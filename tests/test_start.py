@@ -144,7 +144,7 @@ class StartTest(unittest.IsolatedAsyncioTestCase):
         await s.close()
 
     async def test_setup_messages_follow_init_in_order(self):  # protocol.md section 5, "Required post-init setup"
-        s = self.session(name="HUAWEI Band 11-572")
+        s = self.session(name="HUAWEI Band 11-0000")
         await s.start()
         order = list(self.band.seen)
         setup = order[order.index((1, 0x37)) + 1:]
@@ -159,7 +159,7 @@ class StartTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agreements[0].items[1:3], [(4, b"\x01"), (5, b"20230508-20230508-0-0")])
         self.assertLess(abs(int(agreements[0].get_str(6)) / 1000 - time.time()), 5)
         self.assertEqual(seen[(1, 0x3F)].items, [(1, bytes.fromhex("FDF7737A"))])
-        self.assertEqual(seen[(1, 0x3E)].items, [(1, b"\x01"), (2, b"HUAWEI Band 11-572"), (3, b"\x00")])
+        self.assertEqual(seen[(1, 0x3E)].items, [(1, b"\x01"), (2, b"HUAWEI Band 11-0000"), (3, b"\x00")])
         self.assertEqual(seen[(1, 0x3D)].items, [(1, b"")])
         self.assertEqual(seen[(1, 0x35)].items, [(1, b"\x01")])
         await s.close()

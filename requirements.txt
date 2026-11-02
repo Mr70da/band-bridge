@@ -1,11 +1,12 @@
-bleak
-cryptography
-fastapi
-uvicorn
-mcp
-pystray
-Pillow
-winrt-Windows.Media.Control
-winrt-Windows.UI.Notifications
-winrt-Windows.UI.Notifications.Management
-winrt-Windows.ApplicationModel  # AppInfo of a toast
+# Windows 10/11, Python 3.13 (what CI and the author use; 3.11+ likely works)
+bleak==3.0.2
+cryptography==50.0.2
+fastapi==0.162.0
+uvicorn==0.54.0
+mcp==2.3.0
+pystray==0.19.5
+Pillow==13.0.0
+winrt-Windows.Media.Control==4!10.0.28000.2957
+winrt-Windows.UI.Notifications==4!10.0.28000.2957
+winrt-Windows.UI.Notifications.Management==4!10.0.28000.2957
+winrt-Windows.ApplicationModel==4!10.0.28000.2957  # AppInfo of a toast

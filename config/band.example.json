@@ -1,0 +1,12 @@
+{
+  "address": "AA:BB:CC:DD:EE:FF",
+  "name": "HUAWEI Band 11-XXX",
+  "android_id": "00000000000000000000000000000000",
+  "auth_token": "REPLACE_ME_WRITTEN_BY_TOOLS_CONNECT",
+  "quick_replies": ["1", "2", "3", "yes", "no", "continue", "stop"],
+  "weather": {"latitude": 24.4672, "longitude": 39.6111, "name": "Madinah", "units": "metric"},
+  "mirror_notifications": {"enabled": true, "only_when_away": true, "apps": [], "ignore": ["python", "pythonw", "pystray", "claude"]},
+  "lock_on_leave": {"enabled": true, "after": 60},
+  "fitness": {"enabled": true, "interval": 900, "delay": 5, "days": 7},
+  "steps_goal": 8000
+}

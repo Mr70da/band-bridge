@@ -73,7 +73,7 @@ class Tray:
         self.refresh()
         if state == "needs_pairing" and not self.paired_warned:
             self.paired_warned = True
-            self.icon.notify("Band needs pairing: run connect.py")
+            self.icon.notify("Band needs pairing: run tools/connect.py")
 
     def refresh(self):
         self.icon.icon = dot(color_for(self.state))
