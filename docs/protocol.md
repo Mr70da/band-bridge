@@ -468,7 +468,12 @@ Slot count: Gadgetbridge assumes 10 (a TODO in its source). We need 7.
 | `25/02` | PC → band | Now playing: `01` artist, `02` title (UTF-8), `03` state u8 (Android PlaybackState: 0 none, 1 stopped, 2 paused, 3 playing), `04` max volume u8, `05` volume u8. The band answers `7F=186A0`. |
 | `25/03` | band → PC | Button: `01` (lowest byte; 1 play, 2 pause, 3 previous, 4 next, 5 volume up, 6 volume down) and/or `02` volume. Ack `7F=186A0` and push `25/02` again. The values 64 and 100 mean "left the screen" and get no ack. |
 
-No setup is needed. `25/04` and `25/0D` in Gadgetbridge are only for uploading music files. Verified on 2026-11-02: an unprompted `25/02` sent on connect is accepted, and each time the music screen opens the band sends `25/01` and accepts our `25/02`. The `25/03` buttons have not been tested on the band yet. We do not read the PC volume and always report 50 of 100.
+No setup is needed. `25/04` and `25/0D` in Gadgetbridge are only for uploading music files. Verified on 2026-11-02 (FW 6.0.0.130):
+- An unprompted `25/02` sent on connect is accepted. Each time the music screen opens, the band sends `25/01` and accepts our `25/02`. UTF-8 Arabic titles display.
+- Buttons arrive as `25/03 01=` 01 play, 02 pause, 03 previous, 04 next.
+- **Volume is never sent as buttons 5/6.** The band sends its slider as `02=` the new level on the scale of our `04` max (we report 100), in steps of 6. It runs **past 0 as a signed byte** (`04`, `FE`, `F8`, ...), so read it signed and clamp. Band Bridge sets the Windows master volume (IAudioEndpointVolume) and reports the real level in `05`.
+- Windows' `TrySkipNext/Previous` returns True even when the player ignores it. Chrome does that for a YouTube video outside a playlist. Check `controls.is_next_enabled` / `is_previous_enabled`.
+- Band Bridge's mapping: a single previous/next tap seeks 10 s back/forward, and a second tap within 1.5 s changes the track.
 
 ## 8c. Heart rate: not available [src + log]
 

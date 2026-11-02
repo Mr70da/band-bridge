@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from datetime import timedelta as m_timedelta
 from unittest import mock
 
 from band.packet import TLV, Message
@@ -16,7 +17,7 @@ def msg(cmd, tlv, svc=0x25) -> Message:
 
 class FakeMedia:
     def __init__(self, track=SONG):
-        self.track, self.calls, self.fail = track, [], False
+        self.track, self.calls, self.fail, self.refuse = track, [], False, None
 
     async def now_playing(self):
         if self.fail:
@@ -24,8 +25,9 @@ class FakeMedia:
         return self.track
 
     def __getattr__(self, name):
-        async def act():
-            self.calls.append(name)
+        async def act(*args):
+            self.calls.append((name, *args) if args else name)
+            return self.refuse != name
         return act
 
 
@@ -54,6 +56,7 @@ class PacketTest(unittest.TestCase):
                          b"\x01\x06Artist" b"\x02\x04Song" b"\x03\x01\x03" b"\x04\x01\x0f" b"\x05\x01\x07")
 
     def test_empty_track(self):
+        self.assertEqual(m.info_tlv(Track("", "", m.NONE, 8)).get(5), b"")  # the track's own volume by default
         self.assertEqual(m.info_tlv(Track("", "", m.NONE), 100, 50).serialize(),
                          b"\x01\x00" b"\x02\x00" b"\x03\x01\x00" b"\x04\x01\x64" b"\x05\x01\x32")
 
@@ -65,12 +68,16 @@ class PacketTest(unittest.TestCase):
         self.assertEqual(m.status_ack().serialize(), ACK)
 
     def test_parse_control(self):
-        self.assertEqual(m.parse_control(TLV().put_u8(1, 4)), (4, False))
-        self.assertEqual(m.parse_control(TLV().put_u32(1, 0x104)), (4, False))  # only the lowest byte counts
-        self.assertEqual(m.parse_control(TLV().put_u8(2, 9)), (None, True))
-        self.assertEqual(m.parse_control(TLV().put_u8(1, 5).put_u8(2, 9)), (5, True))
+        self.assertEqual(m.parse_control(TLV().put_u8(1, 4)), (4, None))
+        self.assertEqual(m.parse_control(TLV().put_u32(1, 0x104)), (4, None))  # only the lowest byte counts
+        self.assertEqual(m.parse_control(TLV().put_u8(2, 0x38)), (None, 56))  # Band 11 volume slider [log]
+        self.assertEqual(m.parse_control(TLV().put_u8(2, 0)), (None, 0))
+        for below_zero in (0xFE, 0xF8, 0xE0):  # the band runs past 0 as a signed byte [log]
+            self.assertEqual(m.parse_control(TLV().put_u8(2, below_zero)), (None, 0))
+        self.assertEqual(m.parse_control(TLV().put_u8(2, 0x6A)), (None, 100))
+        self.assertEqual(m.parse_control(TLV().put_u8(1, 5).put_u8(2, 9)), (5, 9))
         for ignored in (64, 100):  # leaving the music screen
-            self.assertEqual(m.parse_control(TLV().put_u8(1, ignored)), (None, False))
+            self.assertEqual(m.parse_control(TLV().put_u8(1, ignored)), (None, None))
 
     def test_button_codes(self):
         self.assertEqual(m.ACTIONS, {1: "play", 2: "pause", 3: "previous", 4: "next",
@@ -113,8 +120,24 @@ class ServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((s.sent, s.requests), ([], []))
         self.assertIn("1234", s.logs[0])
 
+    async def test_single_tap_seeks_and_double_tap_changes_track(self):
+        media = FakeMedia()
+        s, svc = self.make(media)
+
+        async def tap(button):
+            svc.on_message(msg(3, TLV().put_u8(1, button)))
+            await self.drain(svc)
+        with mock.patch.object(m, "REFRESH_DELAY", 0):
+            for button in (3, 3, 3, 4, 4, 3, 4):  # double previous, single, double next, previous then next
+                await tap(button)
+            svc._last_tap = ("next", svc._last_tap[1] - m.DOUBLE_TAP)  # a slow second tap is another single
+            await tap(4)
+        self.assertEqual(media.calls, [("seek", -10), "previous", ("seek", -10), ("seek", 10), "next",
+                                       ("seek", -10), ("seek", 10), ("seek", 10)])
+
     async def test_buttons_map_to_media_actions(self):
         for button, action in m.ACTIONS.items():
+            action = {"previous": ("seek", -10), "next": ("seek", 10)}.get(action, action)  # a single tap
             media = FakeMedia()
             s, svc = self.make(media)
             with mock.patch.object(m, "REFRESH_DELAY", 0):
@@ -132,15 +155,31 @@ class ServiceTest(unittest.IsolatedAsyncioTestCase):
             await self.drain(svc)
             self.assertEqual((media.calls, s.sent, s.requests), ([], [], []))
 
-    async def test_unknown_button_and_volume_value_are_acked_without_action(self):
-        for tlv in (TLV().put_u8(1, 9), TLV().put_u8(2, 8)):
-            media = FakeMedia()
-            s, svc = self.make(media)
-            with mock.patch.object(m, "REFRESH_DELAY", 0):
-                svc.on_message(msg(3, tlv))
-                await self.drain(svc)
-            self.assertEqual(media.calls, [])
-            self.assertEqual(len(s.sent), 1)
+    async def test_unknown_button_is_acked_without_action(self):
+        media = FakeMedia()
+        s, svc = self.make(media)
+        with mock.patch.object(m, "REFRESH_DELAY", 0):
+            svc.on_message(msg(3, TLV().put_u8(1, 9)))
+            await self.drain(svc)
+        self.assertEqual((media.calls, len(s.sent)), ([], 1))
+
+    async def test_slider_sets_the_pc_volume_without_a_refresh(self):
+        media = FakeMedia()
+        s, svc = self.make(media)
+        svc.on_message(msg(3, TLV().put_u8(2, 0x38)))
+        await self.drain(svc)
+        self.assertEqual(media.calls, [("set_volume", 56)])
+        self.assertEqual((s.sent, s.requests), ([(0x25, 3, ACK)], []))  # the watcher reports the volume later
+
+    async def test_refused_action_is_logged_and_still_acked(self):
+        media = FakeMedia()
+        media.refuse = "seek"
+        s, svc = self.make(media)
+        with mock.patch.object(m, "REFRESH_DELAY", 0):
+            svc.on_message(msg(3, TLV().put_u8(1, 4)))
+            await self.drain(svc)
+        self.assertIn("the player can't seek", s.logs[0])
+        self.assertEqual(len(s.sent), 1)
 
     async def test_other_messages_and_no_session_are_ignored(self):
         svc = MusicService(FakeMedia())
@@ -221,6 +260,39 @@ class WindowsMediaTest(unittest.TestCase):
         # closed, opened, changing, stopped, playing, paused -> Android PlaybackState
         self.assertEqual([m.WindowsMedia.STATES.get(i, m.NONE) for i in range(6)],
                          [m.NONE, m.NONE, m.NONE, m.STOPPED, m.PLAYING, m.PAUSED])
+
+    def test_actions_the_player_does_not_allow_are_not_sent(self):
+        session = mock.Mock()
+        controls = session.get_playback_info.return_value.controls
+        controls.is_next_enabled = controls.is_previous_enabled = False  # Chrome, YouTube outside a playlist
+        controls.is_playback_position_enabled = True
+        session.try_skip_next_async = mock.AsyncMock(return_value=True)  # Chrome says True and ignores it
+        session.try_change_playback_position_async = mock.AsyncMock(return_value=True)
+        media = m.WindowsMedia(volume=mock.Mock())
+        media._current = mock.AsyncMock(return_value=session)
+        self.assertFalse(asyncio.run(media.next()))
+        self.assertFalse(asyncio.run(media.previous()))
+        session.try_skip_next_async.assert_not_awaited()
+        timeline = session.get_timeline_properties.return_value
+        timeline.position, timeline.end_time = m_timedelta(seconds=5), m_timedelta(seconds=60)
+        session.get_playback_info.return_value.playback_status = 5  # paused: the position is current
+        self.assertTrue(asyncio.run(media.seek(-10)))  # clamped to the start
+        session.try_change_playback_position_async.assert_awaited_with(0)
+        self.assertTrue(asyncio.run(media.seek(10)))
+        session.try_change_playback_position_async.assert_awaited_with(150_000_000)
+        timeline.position = m_timedelta(seconds=55)
+        asyncio.run(media.seek(10))  # clamped to the end
+        session.try_change_playback_position_async.assert_awaited_with(600_000_000)
+
+    def test_no_player_refuses(self):
+        media = m.WindowsMedia(volume=mock.Mock())
+        media._current = mock.AsyncMock(return_value=None)
+        self.assertFalse(asyncio.run(media.next()))
+        self.assertFalse(asyncio.run(media.previous()))
+
+    def test_unreadable_volume_falls_back(self):
+        media = m.WindowsMedia(volume=mock.Mock(get=mock.Mock(side_effect=OSError("no device"))))
+        self.assertEqual(media.volume(), m.VOLUME)
 
     def test_volume_keys(self):
         with mock.patch.object(m.ctypes, "windll") as dll:
