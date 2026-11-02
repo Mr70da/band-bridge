@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 
@@ -8,13 +9,20 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from band.services.music import MusicService
 from band.services.notifications import Notifier
 from band.supervisor import Supervisor
+from bridge.win_notify import NotificationMirror
+
+CONFIG = "config/band.json"
 
 log = logging.getLogger("bridge")
 
 BODY_LIMIT = 480  # the band takes 500 characters; some room for its own clipping
-MAX_OPTIONS = 3  # the band's quick replies are fixed: 1, 2, 3, yes, no, continue, stop
+REPLY_COUNT = 10  # Gadgetbridge assumes 10 quick-reply slots (HuaweiState.getCannedRepliesSlotCount)
+REPLY_LIMIT = 30  # assumed: Gadgetbridge states no length limit; check on the band
+EXTRA_REPLIES = ["yes", "no", "continue", "stop"]  # always offered after the options
+MAX_OPTIONS = min(5, REPLY_COUNT - 2)  # room is left for yes/no
 OPTION_LIMIT = 100
 ASK_WAIT, NOTIFY_WAIT = 15, 5  # seconds to wait for a connected band
 ASK_TITLE = "Claude asks"
@@ -33,11 +41,24 @@ def format_question(question: str, options: list[str]) -> tuple[str, str]:
     return ASK_TITLE, "\n".join([shorten(question, room)] + lines)
 
 
+def quick_replies(options: list[str]) -> list[str]:
+    """What the band shows as quick replies: the options (clipped), then yes/no/continue/stop; no duplicates."""
+    out, seen = [], set()
+    for text in [*(shorten(o, REPLY_LIMIT) for o in options), *EXTRA_REPLIES]:
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            out.append(text)
+    return out[:REPLY_COUNT]
+
+
 def map_reply(reply: str, options: list[str]) -> tuple[str, int | None]:
-    """The raw quick reply -> (answer, 1-based option or None)."""
+    """The raw quick reply -> (answer, 1-based option or None): a number, or the option's text (clipped or not)."""
     key = reply.strip().lower()
-    if key in ("1", "2", "3") and int(key) <= len(options):
+    if key in [str(i) for i in range(1, len(options) + 1)]:
         return options[int(key) - 1], int(key)
+    for i, option in enumerate(options, 1):
+        if key in (option.strip().lower(), shorten(option, REPLY_LIMIT).lower()):
+            return option, i
     return key, None
 
 
@@ -65,13 +86,53 @@ def chain_on_state(extra=None):
     return on_state
 
 
-def create_app(supervisor=None, notifier=None, on_state=None) -> FastAPI:
-    """Without arguments it talks to the real band; tests pass fakes. on_state only reaches a Supervisor made here."""
+def fan_out(notifier, services):
+    """(on_ready, on_message) for the Supervisor. A service may have async setup(session) and on_message(msg);
+    its failure is logged, never fatal: only the notifier's setup can fail a connect."""
+    async def on_ready(session):
+        await notifier.setup(session)
+        for s in services:
+            if hasattr(s, "setup"):
+                try:
+                    await s.setup(session)
+                except Exception as e:
+                    log.warning("%s setup failed: %r", type(s).__name__, e)
+
+    def on_message(msg):
+        for h in (notifier, *services):
+            if hasattr(h, "on_message"):
+                try:
+                    h.on_message(msg)
+                except Exception as e:
+                    log.warning("%s on_message failed: %r", type(h).__name__, e)
+    return on_ready, on_message
+
+
+def load_config(path=CONFIG) -> dict:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def create_app(supervisor=None, notifier=None, on_state=None, services=None) -> FastAPI:
+    """Without arguments it talks to the real band (with music control and the notification mirror); tests pass
+    fakes. on_state only reaches a Supervisor made here. A service's run() lives as long as the app."""
     own = supervisor is None
     notifier = notifier or Notifier()
-    sup = supervisor or Supervisor(
-        on_message=notifier.on_message, on_ready=notifier.setup, on_state=chain_on_state(on_state))
+    services = list(services if services is not None else [MusicService()] if own else [])
+    on_ready, on_message = fan_out(notifier, services)
+    sup = supervisor or Supervisor(on_message=on_message, on_ready=on_ready, on_state=chain_on_state(on_state))
+    if own:
+        async def mirror_send(title, text):
+            if sup.session is not None:
+                await notifier.send(sup.session, title, shorten(text, BODY_LIMIT), reply=False)
+        services.append(NotificationMirror(mirror_send, load_config().get("mirror_notifications")))
     pending: dict[int, asyncio.Future] = {}  # notification id -> raw reply text
+    push_lock = asyncio.Lock()
+    active = 0  # asks between start and end (pending only counts those already sent)
+    custom = False  # the band may hold an ask's list instead of the default
 
     def on_reply(nid, text, key):
         future = pending.get(nid)
@@ -85,7 +146,11 @@ def create_app(supervisor=None, notifier=None, on_state=None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_):
         task = asyncio.create_task(sup.run()) if own else None
+        runs = [asyncio.create_task(s.run()) for s in services if hasattr(s, "run")]
         yield
+        for r in runs:
+            r.cancel()
+        await asyncio.gather(*runs, return_exceptions=True)
         if task:
             await sup.stop()
             await asyncio.gather(task, return_exceptions=True)
@@ -102,28 +167,51 @@ def create_app(supervisor=None, notifier=None, on_state=None) -> FastAPI:
     def not_connected():
         return error(503, "band not connected", state=sup.state)
 
+    async def push_replies(session, replies):
+        """replies=None restores the default, but only when no ask is active. A failure is logged: numbers still work."""
+        nonlocal custom
+        async with push_lock:
+            if replies is None:
+                if active or not custom:
+                    return
+                custom = False
+            else:
+                custom = True
+            try:
+                await notifier.set_replies(session, replies)
+            except Exception as e:
+                log.warning("quick replies %s failed: %r", replies or "restore", e)
+
     @app.post("/ask")
     async def ask(req: Ask):
+        nonlocal active
         if len(req.options) > MAX_OPTIONS:
-            return error(422, f"at most {MAX_OPTIONS} options (the band has quick replies 1, 2, 3)")
+            return error(422, f"at most {MAX_OPTIONS} options")
         session = await ready_session(ASK_WAIT)
         if session is None:
             return not_connected()
         title, body = format_question(req.question, req.options)
         log.info("ask %r options %s", req.question, req.options)
-        nid = await notifier.send(session, title, body, reply=True)
-        future = pending[nid] = asyncio.get_running_loop().create_future()
+        active += 1
         try:
-            reply = await asyncio.wait_for(future, req.timeout)
-        except TimeoutError:
-            log.info("ask %s: no answer within %g s", nid, req.timeout)
-            return error(504, f"no answer within {req.timeout:g} s")
+            if req.options:
+                await push_replies(session, quick_replies(req.options))
+            nid = await notifier.send(session, title, body, reply=True)
+            future = pending[nid] = asyncio.get_running_loop().create_future()
+            try:
+                reply = await asyncio.wait_for(future, req.timeout)
+            except TimeoutError:
+                log.info("ask %s: no answer within %g s", nid, req.timeout)
+                return error(504, f"no answer within {req.timeout:g} s")
+            finally:
+                del pending[nid]
+                try:  # best effort: the band may be gone, or the answer already cleared it
+                    await notifier.remove(sup.session or session, nid)
+                except Exception as e:
+                    log.warning("remove %s failed: %r", nid, e)
         finally:
-            del pending[nid]
-            try:  # best effort: the band may be gone, or the answer already cleared it
-                await notifier.remove(sup.session or session, nid)
-            except Exception as e:
-                log.warning("remove %s failed: %r", nid, e)
+            active -= 1
+            await push_replies(sup.session or session, None)
         answer, option = map_reply(reply, req.options)
         log.info("answer %s: %r (option %s)", nid, answer, option)
         return {"answer": answer, "reply": reply, "option": option, "notification_id": nid}

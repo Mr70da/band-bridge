@@ -180,13 +180,19 @@ class Notifier:
         await _ask(session, 4, TLV().put(0x81, TLV().put(2, True).put(3, True)))
         await _ask(session, 8, TLV().put(1, True))
         try:
-            code = await set_quick_replies(session, session.config.get("quick_replies", QUICK_REPLIES))
+            code = await self.set_replies(session)
             self.quick_replies = await get_quick_replies(session)
             quick = f"update acked {code:X}, band has {self.quick_replies}"
         except (TimeoutError, ValueError) as e:  # not worth dropping the link for
             quick = f"quick replies failed: {e}"
         session.transport.log("EVT", f"notify setup: capabilities {self.capabilities}, "
                                      f"content limit {self.content_limit}, {quick}")
+
+    async def set_replies(self, session, replies=None) -> int:
+        """Replaces the band's quick replies; None = the default list (config "quick_replies" or QUICK_REPLIES)."""
+        if replies is None:
+            replies = session.config.get("quick_replies", QUICK_REPLIES)
+        return await set_quick_replies(session, replies)
 
     async def send(self, session, title, text, reply=True, source_app="org.telegram.messenger", category="msg",
                    sender="Claude Code") -> int:

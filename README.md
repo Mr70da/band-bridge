@@ -52,7 +52,20 @@ Hooks: a band notification when Claude needs input or is done. Put this in `%USE
 }
 ```
 
-The hook always exits 0, also when the bridge is not running.
+The hook always exits 0, also when the bridge is not running. The band only buzzes when you have been away from the keyboard and mouse for 60 s (`BAND_BRIDGE_AWAY_AFTER`; `BAND_BRIDGE_ALWAYS=1` always sends). The title is the project folder's name, and "Task done" includes the first line of Claude's last message.
+
+Permission prompts on the band: when you are away, Claude Code's permission dialog is asked on the band as "<project>: allow Bash? npm test" with Allow / Deny. If you come back to the PC, or there is no answer within `BAND_BRIDGE_PERMISSION_TIMEOUT` (240 s), or anything fails, the normal dialog shows. An error never allows. Add to the same `hooks`:
+
+```json
+"PermissionRequest": [{"hooks": [{"type": "command", "timeout": 300, "command": "\"C:\Users\lenovo\Desktop\Band 11\band-bridge\.venv\Scripts\python.exe\" \"C:\Users\lenovo\Desktop\Band 11\band-bridge\hooks\band_permission.py\""}]}]
+```
+
+## More from the band
+
+- **Option text as quick replies:** `ask_on_band` takes up to 5 options and puts them on the band as the reply list, so you tap "Run tests" instead of "2". Numbers still work.
+- **Music:** the band's music screen shows what the PC is playing (Windows media session) and its buttons play, pause, skip and change the volume.
+- **Windows notifications:** new toasts are mirrored to the band while you are away. Configure in `config/band.json`: `"mirror_notifications": {"enabled": true, "only_when_away": true, "apps": [], "ignore": ["python", "pythonw", "pystray", "claude"]}` (`apps` empty = all; substring match on the app's name or id).
+- **Tray:** the tooltip shows the battery and refreshes every minute, and a toast appears once when it drops below 15%.
 
 ## Run at startup (Phase 8)
 

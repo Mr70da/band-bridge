@@ -5,3 +5,7 @@ uvicorn
 mcp
 pystray
 Pillow
+winrt-Windows.Media.Control
+winrt-Windows.UI.Notifications
+winrt-Windows.UI.Notifications.Management
+winrt-Windows.ApplicationModel  # AppInfo of a toast

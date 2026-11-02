@@ -453,10 +453,26 @@ Slot count: Gadgetbridge assumes 10 (a TODO in its source). We need 7.
 - `02/01` with `sourceAppId = org.telegram.messenger`, type `0x7F` and a reply key → `7F=186A0`. The band showed the reply UI, so **no WhatsApp/SMS fallback is needed**.
 - The tap arrived about 9 s later as `02/10`: `01=02` (type 2), `02=02` (UTF-8, not 3), `04=` our key echoed exactly, `06="yes"`. No ack was sent, and the band did not retry.
 - `02/06` remove → `7F=186A0`.
+- Per-question lists (`/ask` with options) were verified on 2026-11-02. A 7002 update with the option texts plus yes/no/continue/stop (8 items) was acked with `CF` in about 0.15 s. The band showed the words, and the tap came back as the plain text ("Purple"). Restoring the default list after the answer was also acked. We assume at most 10 slots and 30 characters per reply; neither limit has been tested.
 
 ### 8.5 Remove a notification `02/06`
 
 `01 byte type, 02 str sourceAppId, 03 str notificationKey, 04 int notificationId, 05 str channelId, [06 str category]`. Useful to clear a question after it is answered or times out.
+
+## 8b. Music control (service `0x25`) [src: MusicControl.java, HuaweiMusicManager.java; log]
+
+| Message | Direction | Body |
+|---|---|---|
+| `25/01` | band → PC | The band's music screen opened. Body: empty `01`, or `7F`. |
+| `25/01` | PC → band | Ack `7F=186A0`, then push `25/02`. |
+| `25/02` | PC → band | Now playing: `01` artist, `02` title (UTF-8), `03` state u8 (Android PlaybackState: 0 none, 1 stopped, 2 paused, 3 playing), `04` max volume u8, `05` volume u8. The band answers `7F=186A0`. |
+| `25/03` | band → PC | Button: `01` (lowest byte; 1 play, 2 pause, 3 previous, 4 next, 5 volume up, 6 volume down) and/or `02` volume. Ack `7F=186A0` and push `25/02` again. The values 64 and 100 mean "left the screen" and get no ack. |
+
+No setup is needed. `25/04` and `25/0D` in Gadgetbridge are only for uploading music files. Verified on 2026-11-02: an unprompted `25/02` sent on connect is accepted, and each time the music screen opens the band sends `25/01` and accepts our `25/02`. The `25/03` buttons have not been tested on the band yet. We do not read the PC volume and always report 50 of 100.
+
+## 8c. Heart rate: not available [src + log]
+
+`07/1C {01=bool}` (Gadgetbridge `EnableRealtimeHeartRate`) is **not** a live reading. Gadgetbridge sends it in place of `07/17` (automatic HR) when "realtime mode" is set: it switches **continuous HR monitoring** on or off. On 2026-11-02, with the switch on and `2A37` (standard Heart Rate Measurement) subscribed for 40 s, no reading arrived; the band sent only `07/0F {01=03, 02=00000000}`. Gadgetbridge has no live HR read for Huawei, so Band Bridge does not offer one. Never send `07/1C 00`: it turns off the user's monitoring.
 
 ---
 

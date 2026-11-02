@@ -33,14 +33,23 @@ class FakeSupervisor:
 
 
 class FakeNotifier:
-    """Records sends. reply_for(body) -> (delay, text) or None makes the 'band' answer after a delay."""
+    """Records sends and quick-reply pushes (None = the default list; `order` tells which came first).
+    reply_for(body) -> (delay, text) or None makes the 'band' answer after a delay."""
 
-    def __init__(self, reply_for=lambda body: None):
-        self.reply_for, self.on_reply = reply_for, None
-        self.sent, self.removed = [], []
+    def __init__(self, reply_for=lambda body: None, push_error=None):
+        self.reply_for, self.on_reply, self.push_error = reply_for, None, push_error
+        self.sent, self.removed, self.pushes, self.order = [], [], [], []
+
+    async def set_replies(self, session, replies=None):
+        self.order.append("push")
+        self.pushes.append(replies)
+        if self.push_error:
+            raise self.push_error
+        return 0xCF
 
     async def send(self, session, title, text, reply=True):
         nid = 100 + len(self.sent)
+        self.order.append("send")
         self.sent.append(dict(id=nid, title=title, text=text, reply=reply))
         if (answer := self.reply_for(text)) is not None:
             asyncio.get_running_loop().call_later(answer[0], self.on_reply, nid, answer[1], f"key{nid}")
@@ -51,8 +60,8 @@ class FakeNotifier:
         return True
 
 
-def client(reply_for=lambda body: None, ready=True):
-    notifier = FakeNotifier(reply_for)
+def client(reply_for=lambda body: None, ready=True, push_error=None):
+    notifier = FakeNotifier(reply_for, push_error)
     return TestClient(api.create_app(FakeSupervisor(ready), notifier)), notifier
 
 
@@ -77,15 +86,38 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(api.map_reply("3", ["x", "y"]), ("3", None))  # no such option
         self.assertEqual(api.map_reply(" Yes ", []), ("yes", None))
 
+    def test_map_reply_by_option_text(self):
+        long = "Deploy to production now, please " * 2
+        options = ["Red", long, "yes"]
+        self.assertEqual(api.map_reply(" RED ", options), ("Red", 1))
+        self.assertEqual(api.map_reply(api.shorten(long, api.REPLY_LIMIT), options), (long, 2))  # the clipped form
+        self.assertEqual(api.map_reply(long.upper(), options), (long, 2))
+        self.assertEqual(api.map_reply("yes", options), ("yes", 3))
+        self.assertEqual(api.map_reply("stop", options), ("stop", None))
+        self.assertEqual(api.map_reply("4", options), ("4", None))
+        self.assertEqual(api.map_reply("5", list("abcde")), ("e", 5))
+
+    def test_quick_replies_are_options_then_the_fixed_ones(self):
+        self.assertEqual(api.quick_replies(["red", "blue"]), ["red", "blue", "yes", "no", "continue", "stop"])
+
+    def test_quick_replies_clip_dedupe_and_cap(self):
+        clipped = api.quick_replies(["x" * 100])[0]
+        self.assertEqual((len(clipped), clipped[-1]), (api.REPLY_LIMIT, "…"))
+        self.assertEqual(api.quick_replies(["Yes", "NO", "a", "A", " "]), ["Yes", "NO", "a", "continue", "stop"])
+        with mock.patch.object(api, "REPLY_COUNT", 5):
+            self.assertEqual(api.quick_replies(["a", "b", "c"]), ["a", "b", "c", "yes", "no"])
+        self.assertEqual(len(api.quick_replies(list("abcde"))), 9)
+        self.assertLessEqual(api.MAX_OPTIONS + 2, api.REPLY_COUNT)  # yes/no always fit
+
 
 class ApiTest(unittest.TestCase):
     def test_too_many_options_is_422(self):
         c, notifier = client()
         with c:
-            r = c.post("/ask", json={"question": "q", "options": list("abcd")})
+            r = c.post("/ask", json={"question": "q", "options": list("abcdef")})
         self.assertEqual(r.status_code, 422)
-        self.assertIn("at most 3", r.json()["error"])
-        self.assertEqual(notifier.sent, [])
+        self.assertIn("at most 5", r.json()["error"])
+        self.assertEqual((notifier.sent, notifier.pushes), ([], []))
 
     def test_option_answer(self):
         c, notifier = client(lambda body: (0.01, "2"))
@@ -97,12 +129,52 @@ class ApiTest(unittest.TestCase):
         self.assertTrue(notifier.sent[0]["reply"])
         self.assertEqual(notifier.removed, [100])
 
+    def test_options_are_pushed_before_the_ask_and_restored_after(self):
+        c, notifier = client(lambda body: (0.01, "blue"))
+        with c:
+            r = c.post("/ask", json={"question": "Which?", "options": ["red", "blue"]})
+        self.assertEqual((r.json()["answer"], r.json()["option"]), ("blue", 2))
+        self.assertEqual(notifier.pushes, [["red", "blue", "yes", "no", "continue", "stop"], None])
+        self.assertEqual(notifier.order, ["push", "send", "push"])
+
+    def test_timeout_restores_the_default_list(self):
+        c, notifier = client()
+        with c:
+            r = c.post("/ask", json={"question": "Which?", "options": ["red"], "timeout": 0.05})
+        self.assertEqual(r.status_code, 504)
+        self.assertEqual(notifier.pushes, [["red", "yes", "no", "continue", "stop"], None])
+
+    def test_failed_push_falls_back_to_numbers(self):
+        c, notifier = client(lambda body: (0.01, "2"), push_error=TimeoutError("no ack"))
+        with c, self.assertLogs("bridge", "WARNING") as logs:
+            r = c.post("/ask", json={"question": "Which?", "options": ["red", "blue"]})
+        self.assertEqual((r.status_code, r.json()["answer"], r.json()["option"]), (200, "blue", 2))
+        self.assertEqual(notifier.sent[0]["text"], "Which?\n1) red\n2) blue")
+        self.assertTrue(any("quick replies" in line and "no ack" in line for line in logs.output))
+
+    def test_overlapping_asks_keep_the_latest_list_and_restore_once(self):
+        def reply_for(body):
+            return (0.4, "x") if body.startswith("first") else (0.05, "2")
+
+        c, notifier = client(reply_for)
+        with c, ThreadPoolExecutor(2) as pool:
+            a = pool.submit(c.post, "/ask", json={"question": "first", "options": ["x"]})
+            while not notifier.sent:
+                threading.Event().wait(0.01)
+            b = pool.submit(c.post, "/ask", json={"question": "second", "options": ["y", "z"]})
+            a, b = a.result().json(), b.result().json()
+        self.assertEqual((a["answer"], a["option"]), ("x", 1))  # each ask maps by its own options
+        self.assertEqual((b["answer"], b["option"]), ("z", 2))
+        self.assertEqual(notifier.pushes, [["x", "yes", "no", "continue", "stop"],
+                                           ["y", "z", "yes", "no", "continue", "stop"], None])
+
     def test_yes_without_options(self):
         c, notifier = client(lambda body: (0.01, "yes"))
         with c:
             r = c.post("/ask", json={"question": "Proceed?"})
         self.assertEqual((r.json()["answer"], r.json()["option"]), ("yes", None))
         self.assertEqual(notifier.removed, [100])
+        self.assertEqual(notifier.pushes, [])  # no options: the default list stays
 
     def test_timeout_is_504_and_removes(self):
         c, notifier = client()
@@ -154,6 +226,49 @@ class ApiTest(unittest.TestCase):
         c, notifier = client()
         with c:
             notifier.on_reply(999, "yes", "k")  # must not raise
+
+
+class WiringTest(unittest.TestCase):
+    def test_service_run_lives_as_long_as_the_app(self):
+        class Service:
+            started = cancelled = False
+
+            async def run(self):
+                Service.started = True
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    Service.cancelled = True
+                    raise
+        with TestClient(api.create_app(FakeSupervisor(), FakeNotifier(), services=[Service()])):
+            pass
+        self.assertTrue(Service.started and Service.cancelled)
+
+    def test_fan_out_survives_a_failing_service(self):
+        seen = []
+
+        class Broken:
+            async def setup(self, session):
+                raise OSError("x")
+
+            def on_message(self, msg):
+                raise ValueError("y")
+
+        class Good:
+            async def setup(self, session):
+                seen.append("setup")
+
+            def on_message(self, msg):
+                seen.append(msg)
+
+        class Notifier:
+            async def setup(self, session):
+                seen.append("notifier")
+
+        on_ready, on_message = api.fan_out(Notifier(), [Broken(), Good()])
+        asyncio.run(on_ready(None))
+        on_message("m")
+        self.assertEqual(seen, ["notifier", "setup", "m"])
 
 
 class FakeHttp:
@@ -241,7 +356,7 @@ class McpServerTest(unittest.TestCase):
 
 class HookTest(unittest.TestCase):
     def run_hook(self, kind, stdin, port):
-        env = {**os.environ, "BAND_BRIDGE_PORT": str(port)}
+        env = {**os.environ, "BAND_BRIDGE_PORT": str(port), "BAND_BRIDGE_ALWAYS": "1"}  # send even when at the PC
         return subprocess.run([sys.executable, str(ROOT / "hooks" / "band_notify.py"), kind], input=stdin,
                               text=True, env=env, timeout=10, capture_output=True)
 

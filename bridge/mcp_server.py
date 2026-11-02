@@ -47,7 +47,7 @@ def failure(status: int, body: dict) -> str:
 
 @mcp.tool()
 async def ask_on_band(question: str, options: list[str] = [], timeout_seconds: int = 300) -> str:
-    """Ask the user a short question on their Huawei Band and wait for their tap. Use for choices with at most 3 options, or yes/no/continue/stop questions. Keep the question short (it is shown on a small screen)."""
+    """Ask the user a short question on their Huawei Band and wait for their tap. Use for choices with up to 5 options (the user taps the option text on the band; keep each option under 30 characters), or yes/no/continue/stop questions. Keep the question short (it is shown on a small screen)."""
     result = await call("/ask", {"question": question, "options": options, "timeout": timeout_seconds},
                         timeout_seconds + 15)
     if isinstance(result, str):

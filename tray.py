@@ -14,6 +14,7 @@ from pathlib import Path
 
 PORT = int(os.environ.get("BAND_BRIDGE_PORT", 8765))
 GREEN, AMBER, RED = (46, 160, 67), (230, 150, 0), (210, 40, 40)
+POLL_SECONDS, LOW_BATTERY, BATTERY_OK = 60, 15, 20  # toast below LOW_BATTERY, re-arm above BATTERY_OK
 COLORS = {"ready": GREEN, "connecting": AMBER, "backoff": AMBER}  # anything else (needs_pairing, stopped, error): red
 
 log = logging.getLogger("tray")
@@ -24,7 +25,21 @@ def color_for(state):
 
 
 def tooltip(state, battery=None):
-    return f"Band Bridge: {state}" + (f" (battery {battery}%)" if battery is not None else "")
+    return f"Band Bridge: {state}" + (f", battery {battery}%" if battery is not None else "")
+
+
+def battery_alert(battery, warned):
+    """-> (warned, toast now?): one toast per dip below LOW_BATTERY, re-armed once the battery is above BATTERY_OK."""
+    if battery is None:
+        return warned, False
+    if battery < LOW_BATTERY and not warned:
+        return True, True
+    return (False if battery > BATTERY_OK else warned), False
+
+
+def api_get(path, timeout):
+    with urllib.request.urlopen(f"http://127.0.0.1:{PORT}{path}", timeout=timeout) as r:
+        return json.load(r)
 
 
 def dot(color):
@@ -38,6 +53,8 @@ class Tray:
     def __init__(self):
         import pystray
         self.state, self.battery, self.paired_warned, self.quitting = "starting", None, False, False
+        self.low_battery_warned = False
+        self.stopped = threading.Event()
         self.icon = pystray.Icon("band-bridge", dot(RED), tooltip(self.state), pystray.Menu(
             pystray.MenuItem("Status", self.show_status),
             pystray.MenuItem("Open log folder", lambda: os.startfile(Path("logs").resolve())),
@@ -47,11 +64,36 @@ class Tray:
     def on_state(self, state, detail=""):  # called from the server thread
         self.state = state
         if m := re.search(r"battery (\d+)%", detail):
-            self.battery = int(m[1])
-        self.icon.icon, self.icon.title = dot(color_for(state)), tooltip(state, self.battery)
+            self.set_battery(int(m[1]))
+        self.refresh()
         if state == "needs_pairing" and not self.paired_warned:
             self.paired_warned = True
             self.icon.notify("Band needs pairing: run connect.py")
+
+    def refresh(self):
+        self.icon.icon = dot(color_for(self.state))
+        self.icon.title = tooltip(self.state, self.battery)
+
+    def set_battery(self, battery):
+        self.battery = battery
+        self.low_battery_warned, toast = battery_alert(battery, self.low_battery_warned)
+        if toast:
+            self.icon.notify(f"Band battery low: {battery}%", "Band Bridge")
+
+    def poll_once(self):  # the Supervisor reads the battery every 60 s, but only /status shows it
+        try:
+            s = api_get("/status", 3)
+        except Exception as e:  # API still starting or stopping: keep the last values
+            log.debug("status poll failed: %r", e)
+            return
+        self.state = s.get("state", self.state)
+        if s.get("battery") is not None:
+            self.set_battery(s["battery"])
+        self.refresh()
+
+    def poll(self):
+        while not self.stopped.wait(POLL_SECONDS):
+            self.poll_once()
 
     def show_status(self):
         try:  # asks the running API, so connects/disconnects come from the Supervisor
@@ -78,6 +120,7 @@ class Tray:
 
     def quit(self):
         self.quitting = True
+        self.stopped.set()
 
         def stop():
             if self.server:
@@ -91,6 +134,7 @@ class Tray:
             icon.visible = True
             self.thread = threading.Thread(target=self.serve, name="bridge")
             self.thread.start()
+            threading.Thread(target=self.poll, name="poll", daemon=True).start()
         self.icon.run(setup)
 
 

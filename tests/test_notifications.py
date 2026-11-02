@@ -288,6 +288,15 @@ class NotifierFlowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await n.get_quick_replies(self.s), ["a", "b"])  # the second query has its own sequence
         self.assertEqual([t.get_int(2) for t in self.band.of(0x34, 1) if t.get_int(1) == 2], [1, 2, 3])
 
+    async def test_set_replies_defaults_to_the_config_list(self):
+        self.assertEqual(await self.notifier.set_replies(self.s, ["red", "yes"]), 0xCF)
+        self.assertEqual(self.band.stored, ["red", "yes"])
+        await self.notifier.set_replies(self.s)
+        self.assertEqual(self.band.stored, n.QUICK_REPLIES)
+        self.s.config["quick_replies"] = ["ok"]
+        await self.notifier.set_replies(self.s)
+        self.assertEqual(self.band.stored, ["ok"])
+
     async def test_a_silent_band_does_not_fail_setup(self):
         self.band.mute = {(2, 5), (2, 4), (0x34, 1)}
         await self.notifier.setup(self.s)
