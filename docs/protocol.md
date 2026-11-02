@@ -101,6 +101,7 @@ CRC verified: `crc16_xmodem(5A000B0001010100020003000400) = 0xF13B`.
 ```
 - `SLICE`: `01` first, `02` middle, `03` last. `FLAG`: slice counter `00, 01, 02, ...`.
 - `LEN` = bytes after LEN excluding CRC. Each slice is at most `sliceSize` bytes in total.
+- Gadgetbridge slices once `2 + len(body) > sliceSize − 7`, so the largest unsliced frame is `sliceSize − 1` bytes (1021 on Band 11). None of the 483 frames in `gb6012.log` is sliced; slicing is tested only against Gadgetbridge's unit-test vectors.
 - Each slice has its own CRC. On receive, concatenate the chunks (first chunk starts with SVC CMD) and parse once `SLICE == 03`.
 - Band 11 `sliceSize = 0x03FE` (1022) [log]. Notifications and auth never get near that; slicing matters only for big payloads.
 
@@ -189,6 +190,8 @@ Band 11 response [log]:
 09 12 "F8:3B:7E:06:22:BF" 00  (band BT MAC as text, NUL-terminated)
 0A 04 00000000
 ```
+**Our band on Windows (Phase 3, factory-reset, never paired) [log]:** tag2 = `01` (not `02`), so `authType = 1 XOR 4 = 5`. That is still HiChain3 ((5 XOR 1) == 4). Tag2 likely means "pair type": 1 = first pair, 2 = known peer. The #6012 capture came from a band stuck in a re-pair loop. [verify after Phase 4 that a reconnect returns 2]
+
 Auth type math (`DeviceConfig.SecurityNegotiation.Response.parseTlv`): tag1 = 4 sets `pw = 4`; tag2 = 2, so `authType = 2 XOR 4 = 6`. Then `isHiChain3(6)` is true ((6 XOR 2) == 4), so the path is **HiChain mode** (`GetHiChainRequest`). If tag `0x7F` were present it would override authType.
 
 ### Step 3: PIN code `01/2C` (first pairing only)
