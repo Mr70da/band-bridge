@@ -475,6 +475,25 @@ No setup is needed. `25/04` and `25/0D` in Gadgetbridge are only for uploading m
 - Windows' `TrySkipNext/Previous` returns True even when the player ignores it. Chrome does that for a YouTube video outside a playlist. Check `controls.is_next_enabled` / `is_previous_enabled`.
 - Band Bridge's mapping: a single previous/next tap seeks 10 s back/forward, and a second tap within 1.5 s changes the track.
 
+## 8d. Weather (service `0x0F`) [src: Weather.java; log]
+
+The PC sends this sequence, each request encrypted and answered with `7F` or data:
+
+| Cmd | Body | Band 11 reply (2026-11-02) |
+|---|---|---|
+| `09` start | `01=03` | `7F=186A0` |
+| `05` unit | `01=` 0 °C, 1 °F | `7F=186A0` |
+| `02` support | `01` empty | `01=FF` (all: icon, wind, pm2.5, low/high, location, current temp, unit, AQI) |
+| `06` extended support | `01` empty | `01=000F` |
+| `0A` sun/moon support | `01` empty | `01=00000003` (sunrise/sunset, moon phase) |
+| `01` current | `81{02 icon, 03 u16 wind}`, `85{06 low, 07 high}`, `08` name, `09` temp (signed, always °C), `0A` unit, `0C` time u32, `0E` source, `0F` uv, `10` humidity, `11` wind km/h u32, `12` feels-like | `7F=186A0`; shows on the band |
+| `08` forecast | `81{82{03 ts, 04 icon, 05 temp, 06 rain %, 07 uv}...}`, `90{91{12 ts, 13 icon, 14 high, 15 low, 16 sunrise, 17 sunset}...}` | **`7F=1C139`, rejected.** Gadgetbridge gets the same code from a Band 11 (issue log gb6012). |
+
+Band-initiated messages:
+- After connect the band sends `0F/04 {01=02, 02=00}`, which is acked with `04 {01=186A0}`.
+- `0F/04` with `7F=186AA` means "send weather".
+- `0F/03 {01=0001}` is unknown, and Gadgetbridge ignores it.
+
 ## 8c. Heart rate: not available [src + log]
 
 `07/1C {01=bool}` (Gadgetbridge `EnableRealtimeHeartRate`) is **not** a live reading. Gadgetbridge sends it in place of `07/17` (automatic HR) when "realtime mode" is set: it switches **continuous HR monitoring** on or off. On 2026-11-02, with the switch on and `2A37` (standard Heart Rate Measurement) subscribed for 40 s, no reading arrived; the band sent only `07/0F {01=03, 02=00000000}`. Gadgetbridge has no live HR read for Huawei, so Band Bridge does not offer one. Never send `07/1C 00`: it turns off the user's monitoring.

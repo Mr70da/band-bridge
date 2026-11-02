@@ -65,6 +65,8 @@ Permission prompts on the band: when you are away, Claude Code's permission dial
 - **Option text as quick replies:** `ask_on_band` takes up to 5 options and puts them on the band as the reply list, so you tap "Run tests" instead of "2". Numbers still work.
 - **Music:** the band's music screen shows what the PC is playing (Windows media session). Play and pause work as usual. One tap on previous/next jumps 10 s back/forward, and a double tap changes the track (if the player has one: a YouTube playlist or Spotify, but not a single YouTube video). The volume slider sets the Windows volume.
 - **Windows notifications:** new toasts are mirrored to the band while you are away. Configure in `config/band.json`: `"mirror_notifications": {"enabled": true, "only_when_away": true, "apps": [], "ignore": ["python", "pythonw", "pystray", "claude"]}` (`apps` empty = all; substring match on the app's name or id).
+- **Weather:** current weather from Open-Meteo (no key), refreshed every 30 min. Set the place in `config/band.json`: `"weather": {"latitude": 24.4672, "longitude": 39.6111, "name": "Madinah"}` or `{"city": "Cairo"}`, plus `"units": "imperial"` if wanted. The Band 11 refuses the forecast (see docs/protocol.md 8d), so only the current weather shows.
+- **Lock when you leave:** the PC locks once the band has been out of range and the PC idle for 60 s. A Bluetooth drop while you type never locks. `"lock_on_leave": {"enabled": true, "after": 60}`.
 - **Tray:** the tooltip shows the battery and refreshes every minute, and a toast appears once when it drops below 15%.
 
 ## Run at startup (Phase 8)
