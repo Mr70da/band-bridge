@@ -60,6 +60,15 @@ Permission prompts on the band: when you are away, Claude Code's permission dial
 "PermissionRequest": [{"hooks": [{"type": "command", "timeout": 300, "command": "\"C:\Users\lenovo\Desktop\Band 11\band-bridge\.venv\Scripts\python.exe\" \"C:\Users\lenovo\Desktop\Band 11\band-bridge\hooks\band_permission.py\""}]}]
 ```
 
+## Steer Claude from the band
+
+All of these are Claude Code hooks in `hooks/`, registered in `%USERPROFILE%\.claude\settings.json`. Every one always exits 0 and never acts on an error. The only exception is the guard, which fails closed.
+
+- **Wrist remote** (Stop, `band_notify.py done`, timeout 300): when Claude finishes while you are away, the band asks "Next?" with Keep going / Run tests / Commit / Stop, and Claude continues with your choice. Set `BAND_BRIDGE_REMOTE=0` to get the plain "Task done" instead.
+- **Stuck detector** (PostToolUse and PostToolUseFailure on Bash, `band_stuck.py`): after 3 failed commands in a row while you are away, the band asks Keep going / Try another way / Stop.
+- **Danger guard** (PreToolUse on Bash, `band_guard.py`, timeout 150): force-push, push to main/master, hard reset, `git clean -f`, `branch -D`, recursive deletes, DROP/TRUNCATE, kubectl delete, terraform destroy/apply, docker system prune, npm publish and deploy commands need an Allow on the band, **even at the PC**. No answer within 120 s blocks the command. A quoted command text such as a commit message counts as dangerous too; use `git commit -F file` to avoid that. Set `BAND_BRIDGE_GUARD=0` to turn it off.
+- **Session board** (SessionStart, UserPromptSubmit, Notification, Stop, SessionEnd, `band_session.py`): one band notification lists every running Claude session (⏳ waiting, ✅ done, ⚙ working). It is only sent while you are away; `GET /sessions` shows it any time.
+
 ## More from the band
 
 - **Option text as quick replies:** `ask_on_band` takes up to 5 options and puts them on the band as the reply list, so you tap "Run tests" instead of "2". Numbers still work.
