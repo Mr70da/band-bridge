@@ -15,7 +15,7 @@ from band.services.music import MusicService
 from band.services.weather import WeatherService
 from band.services.notifications import Notifier
 from band.supervisor import Supervisor
-from bridge import dashboard
+from bridge import dashboard, idle, sessions
 from bridge.away_lock import AwayLock
 from bridge.win_notify import NotificationMirror
 
@@ -165,6 +165,7 @@ def create_app(supervisor=None, notifier=None, on_state=None, services=None, sto
             await asyncio.gather(task, return_exceptions=True)
 
     app = FastAPI(title="Band Bridge", lifespan=lifespan)
+    app.include_router(sessions.router(lambda: sup.session, notifier, away=idle.away))
     app.include_router(dashboard.router(store, status=lambda: {
         "state": sup.state, "battery": getattr(sup.session, "battery", None)}))
 

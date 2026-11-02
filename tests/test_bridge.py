@@ -356,7 +356,8 @@ class McpServerTest(unittest.TestCase):
 
 class HookTest(unittest.TestCase):
     def run_hook(self, kind, stdin, port):
-        env = {**os.environ, "BAND_BRIDGE_PORT": str(port), "BAND_BRIDGE_ALWAYS": "1"}  # send even when at the PC
+        env = {**os.environ, "BAND_BRIDGE_PORT": str(port), "BAND_BRIDGE_ALWAYS": "1",
+               "BAND_BRIDGE_REMOTE": "0"}  # send even when at the PC; the plain notify, not the remote
         return subprocess.run([sys.executable, str(ROOT / "hooks" / "band_notify.py"), kind], input=stdin,
                               text=True, env=env, timeout=10, capture_output=True)
 

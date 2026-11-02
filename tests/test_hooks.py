@@ -46,7 +46,7 @@ def sent(urlopen, n=0):
     return req.full_url, json.loads(req.data)
 
 
-@mock.patch.dict(os.environ, {"BAND_BRIDGE_PORT": "9999"})
+@mock.patch.dict(os.environ, {"BAND_BRIDGE_PORT": "9999", "BAND_BRIDGE_REMOTE": "0"})
 class NotifyTest(unittest.TestCase):
     def setUp(self):
         os.environ.pop("BAND_BRIDGE_ALWAYS", None)
@@ -88,6 +88,88 @@ class NotifyTest(unittest.TestCase):
         run(band_notify, "not json", ("hook", "input"))
         run(band_notify, "[1]", ("hook", "done"))
         self.assertEqual(self.urlopen.call_count, 2)
+
+
+class RemoteTest(unittest.TestCase):
+    EVENT = {"cwd": "C:/x/proj", "last_assistant_message": "\nFixed it.\nMore", "stop_hook_active": False}
+
+    def setUp(self):
+        for k in ("BAND_BRIDGE_ALWAYS", "BAND_BRIDGE_REMOTE"):
+            os.environ.pop(k, None)
+        patches = [mock.patch("urllib.request.urlopen"), mock.patch("bridge.idle.away", return_value=True),
+                   mock.patch("bridge.idle.idle_seconds", return_value=300.0),
+                   mock.patch.object(band_notify, "POLL", 0.01)]
+        self.urlopen, self.away, self.idle, _ = (p.start() for p in patches)
+        for p in patches:
+            self.addCleanup(p.stop)
+
+    def answer(self, event=None, **reply):
+        self.urlopen.return_value = Reply(json.dumps(reply).encode())
+        out = run(band_notify, event or self.EVENT, ("hook", "done"))
+        return json.loads(out) if out else None
+
+    def test_asks_the_band(self):
+        self.answer(option=4)
+        url, body = sent(self.urlopen)
+        self.assertEqual(url, "http://127.0.0.1:8765/ask")
+        self.assertEqual(body, {"question": "proj: Fixed it.  Next?", "timeout": 240,
+                                "options": ["Keep going", "Run tests", "Commit", "Stop"]})
+
+    def test_timeout_from_env(self):
+        self.urlopen.return_value = Reply()
+        run(band_notify, self.EVENT, ("hook", "done"), {"BAND_BRIDGE_REMOTE_TIMEOUT": "30"})
+        self.assertEqual(sent(self.urlopen)[1]["timeout"], 30)
+
+    def test_mappings(self):
+        who = "The user says from their band: "
+        keep = "keep going with the task."
+        cases = [({"option": 1}, keep), ({"answer": "Keep going", "option": 1}, keep),
+                 ({"option": 2}, "run the project's tests and fix any failures."),
+                 ({"option": 3}, "commit the current work with a clear message."),
+                 ({"answer": "yes"}, keep), ({"answer": " Continue "}, keep)]
+        for reply, reason in cases:
+            self.assertEqual(self.answer(**reply), {"decision": "block", "reason": who + reason})
+
+    def test_stop_and_unknown_replies_print_nothing(self):
+        for reply in ({"option": 4}, {"answer": "Stop"}, {"answer": "no"}, {"answer": "do something else"}, {}):
+            self.assertIsNone(self.answer(**reply))
+
+    def test_stop_hook_active_still_asks(self):
+        self.assertEqual(self.answer({**self.EVENT, "stop_hook_active": True}, option=1)["decision"], "block")
+
+    def test_errors_print_nothing(self):
+        http = urllib.error.HTTPError("u", 503, "band not connected", {}, None)
+        for failure in (http, urllib.error.HTTPError("u", 504, "timeout", {}, None), OSError("refused"), TimeoutError()):
+            self.urlopen.side_effect = failure
+            self.assertEqual(run(band_notify, self.EVENT, ("hook", "done")), "")
+        self.urlopen.side_effect = None
+        self.urlopen.return_value = Reply(b"garbage")
+        self.assertEqual(run(band_notify, self.EVENT, ("hook", "done")), "")
+
+    def test_present_user_gets_nothing(self):
+        self.away.return_value = False
+        self.assertEqual(run(band_notify, self.EVENT, ("hook", "done")), "")
+        self.urlopen.assert_not_called()
+
+    def test_user_coming_back_aborts(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        self.urlopen.side_effect = lambda *a, **k: release.wait(10) and Reply(b'{"option": 1}')
+        self.idle.return_value = 0.5
+        start = time.monotonic()
+        self.assertEqual(run(band_notify, self.EVENT, ("hook", "done")), "")
+        self.assertLess(time.monotonic() - start, 3)
+
+    def test_remote_off_falls_back_to_notify(self):
+        self.urlopen.return_value = Reply()
+        self.assertEqual(run(band_notify, self.EVENT, ("hook", "done"), {"BAND_BRIDGE_REMOTE": "0"}), "")
+        url, body = sent(self.urlopen)
+        self.assertEqual((url[-7:], body["text"]), ("/notify", "Task done: Fixed it."))
+
+    def test_input_kind_unchanged(self):
+        self.urlopen.return_value = Reply()
+        run(band_notify, {"message": "hi"}, ("hook", "input"))
+        self.assertEqual(sent(self.urlopen)[1]["text"], "Claude needs your input: hi")
 
 
 class PermissionTest(unittest.TestCase):
