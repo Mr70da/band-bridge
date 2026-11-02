@@ -230,7 +230,23 @@ Band 11 expand capabilities [log]: `FF7F014226C37442A0A6BC7222698A4B87AAA10D6EFD
 | 94 | repeated notify | yes |
 | 120 | remove single notification | yes |
 
-**For Band Bridge** we need only steps 1-8 plus the notification subset of step 12 (section 8). Supported services/commands/capabilities (9-11) are cheap and tell us what the band accepts, so keep them too.
+### Required post-init setup [log, Phase 5 diagnostic]
+
+**Without these messages the band revokes the session about 25 s after connect.** Every later request, even plaintext ones, then gets a plaintext `7F = 0x000186A4` while the link stays up. With them, requests keep working (checked at +30, +45, +70 and +100 s). Plaintexts below are taken from Gadgetbridge's log for Band 11 and sent in this order, encrypted:
+
+| SVC/CMD | Plaintext TLV | Reply on our band |
+|---|---|---|
+| `1A/05` extended account | `01=00, 03=01` | `02=00` |
+| `01/31` setting related | tags `01`–`06` empty | `01=0F 02=0E 03=03 …` |
+| `01/30` accept agreements | `81 { 82 {03 name, 04=01, 05="20230508-20230508-0-0", 06=<now ms as ASCII>} ×3 }`, names: `software_update_service_statement`, `device_information_management`, `user_license_agreement` | `7F=186A0` |
+| `01/3F` reverse capabilities | `01=FDF7737A` | `7F=186A0` |
+| `01/3E` set-up device status | `01=01, 02=<band name>, 03=00` | **no reply** (send without waiting) |
+| `01/3D` wear status | `01` empty | `01=02` |
+| `01/35` connect status | `01=01` | `7F=186A0` |
+
+Which of these is the one that matters was not bisected; we send all of them, like Gadgetbridge. Afterwards the band starts sending `01/10` phone-info requests (answer them), `34/01` P2P data (ack it), and many `37/01`, `37/02`, `37/04` service announcements (no answer needed so far).
+
+**For Band Bridge** we need steps 1-8, the setup messages above, and the notification subset of step 12 (section 8). Supported services/commands/capabilities (9-11) are cheap and tell us what the band accepts, so keep them too.
 
 ### Band-initiated messages after init [log]
 
@@ -451,6 +467,10 @@ Never log `auth_token` or the per-connection `secretKey` except at an explicit d
 
 - **#5930**, FW 6.0.0.118, "disconnects after a few seconds". Cause: the Huawei Health app on the phone was also connecting to the band. **For us:** the phone must not be connected to the band (unpair it, or turn off its Bluetooth / Huawei Health). The band talks to one central at a time.
 - **#6012**, FW 6.0.0.113, `STATE_DISCONNECTED GATT_VALUE_NOT_ALLOWED` about 20 s after connect, followed by a new pairing prompt in a loop. It resolved by itself for the reporter. Gadgetbridge maintainers report "Force legacy GATT" fixes similar cases (section 2). The reporter's later state: occasional drops, sometimes stuck offline until Bluetooth was toggled.
+- **Measured recovery (Phase 5, our band, Windows) [log]:**
+  - PC Bluetooth toggled off/on: ready again in 13 s.
+  - Band powered off for 3 min: five `BleakDeviceNotFoundError` retries (each scan times out at 30 s; backoff 2-30 s), then ready 7 s after the band booted.
+  - The band **keeps our pairing across a reboot**: Security Negotiation tag2 = `02`, op 2 only, no prompt.
 - **Implications for Phases 4-5:** no PHY request (already true on Windows); one strictly serialized write queue; a reconnect loop with backoff; detect "connected but no reply to Link Params within N s" as stuck and force a disconnect. Gadgetbridge's only periodic traffic is a battery poll (`01/08`) every 15 min. Use it as our heartbeat.
 
 ---

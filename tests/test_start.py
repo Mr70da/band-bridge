@@ -22,7 +22,7 @@ class FakeLinkTransport:
 
     band = None  # set per test
 
-    def __init__(self, address, log_dir="logs", on_disconnect=None):
+    def __init__(self, address, log_dir="logs", on_disconnect=None, log_path=None):
         self.frames = asyncio.Queue()
         self.chunk_size = 20
         self.log_path = "fake.log"
@@ -45,7 +45,11 @@ class FakeLinkTransport:
         key = self.band.secret_key
         if 0x7C in msg.tlv:
             msg.tlv = decrypt_body(msg.tlv, key)
-        reply, encrypted = await self.band.answer(msg)
+            self.band.encrypted.add((msg.service, msg.command))
+        answer = await self.band.answer(msg)
+        if answer is None:  # the band does not reply to every message
+            return
+        reply, encrypted = answer
         body = reply.serialize()
         for out in build_frames(msg.service, msg.command, encrypt_body(body, key) if encrypted else body):
             self.frames.put_nowait(out)
@@ -56,11 +60,14 @@ class LinkBand(FakeBand):
 
     def __init__(self, tag2=1):
         super().__init__(PIN, TOKEN)
-        self.tag2, self.seen = tag2, {}
+        self.tag2, self.seen, self.encrypted = tag2, {}, set()
+        self.rejected = set()  # (svc, cmd) pairs answered with 7F = 0x186A4
 
     async def answer(self, msg):
         t = msg.tlv
         self.seen[(msg.service, msg.command)] = t
+        if (msg.service, msg.command) in self.rejected:
+            return TLV().put_u32(0x7F, 0x186A4), True
         match (msg.service, msg.command):
             case (1, 0x01):
                 return (TLV().put_u8(1, 2).put_u16(2, 0x3FE).put_u16(3, 0x202).put_u16(4, 0).put_u8(7, 4)), False
@@ -81,6 +88,15 @@ class LinkBand(FakeBand):
                 return TLV().put(2, bytes([1, 0] * 21 + [1])), True
             case (1, 0x37):
                 return TLV().put(1, CAPS), True
+            case (0x1A, 0x05):
+                return TLV().put_u8(2, 0), True
+            case (1, 0x31):
+                return TLV().put_u8(1, 0x0F).put_u8(2, 0x0E).put_u8(3, 3), True
+            case (1, 0x30 | 0x3F | 0x35):
+                return TLV().put_u32(0x7F, 0x186A0), True
+            case (1, 0x3D):
+                return TLV().put_u8(1, 2), True
+            # (1, 0x3E) gets no reply: falls through and returns None
 
 
 class StartTest(unittest.IsolatedAsyncioTestCase):
@@ -125,6 +141,34 @@ class StartTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.prompts, [])
         self.assertNotIn((1, 0x2C), self.band.seen)
         self.assertEqual(s.secret_key, self.band.secret_key)
+        await s.close()
+
+    async def test_setup_messages_follow_init_in_order(self):  # protocol.md section 5, "Required post-init setup"
+        s = self.session(name="HUAWEI Band 11-572")
+        await s.start()
+        order = list(self.band.seen)
+        setup = order[order.index((1, 0x37)) + 1:]
+        self.assertEqual(setup, [(0x1A, 5), (1, 0x31), (1, 0x30), (1, 0x3F), (1, 0x3E), (1, 0x3D), (1, 0x35)])
+        self.assertTrue(set(setup) <= self.band.encrypted)
+        seen = self.band.seen
+        self.assertEqual(seen[(0x1A, 5)].items, [(1, b"\x00"), (3, b"\x01")])
+        self.assertEqual(seen[(1, 0x31)].items, [(tag, b"") for tag in range(1, 7)])
+        agreements = [TLV.parse(a) for a in seen[(1, 0x30)].get_tlv(0x81).get_all(0x82)]
+        self.assertEqual([a.get_str(3) for a in agreements], [
+            "software_update_service_statement", "device_information_management", "user_license_agreement"])
+        self.assertEqual(agreements[0].items[1:3], [(4, b"\x01"), (5, b"20230508-20230508-0-0")])
+        self.assertLess(abs(int(agreements[0].get_str(6)) / 1000 - time.time()), 5)
+        self.assertEqual(seen[(1, 0x3F)].items, [(1, bytes.fromhex("FDF7737A"))])
+        self.assertEqual(seen[(1, 0x3E)].items, [(1, b"\x01"), (2, b"HUAWEI Band 11-572"), (3, b"\x00")])
+        self.assertEqual(seen[(1, 0x3D)].items, [(1, b"")])
+        self.assertEqual(seen[(1, 0x35)].items, [(1, b"\x01")])
+        await s.close()
+
+    async def test_rejected_setup_reply_is_logged_not_raised(self):
+        self.band.rejected.add((1, 0x35))
+        s = self.session()
+        await s.start()
+        self.assertIn("EVT setup 01/35 rejected, 7F=186A4", s.transport.logs)
         await s.close()
 
     async def test_rejected_stored_key_is_not_replaced(self):

@@ -45,7 +45,7 @@ class FrameAssembler:
 
 
 class Transport:
-    def __init__(self, address, log_dir="logs", chunk_size=20, on_frame=None, on_disconnect=None):
+    def __init__(self, address, log_dir="logs", chunk_size=20, on_frame=None, on_disconnect=None, log_path=None):
         self.address = address
         self.chunk_size = chunk_size
         self.on_frame = on_frame
@@ -54,8 +54,9 @@ class Transport:
         self.client = None
         self._asm = FrameAssembler()
         self._lock = asyncio.Lock()
-        os.makedirs(log_dir, exist_ok=True)
-        self.log_path = os.path.join(log_dir, datetime.now().strftime("ble-%Y%m%d-%H%M%S.log"))
+        # a given log_path is shared by every Transport of one supervisor run, so it is appended to
+        self.log_path = log_path or os.path.join(log_dir, datetime.now().strftime("ble-%Y%m%d-%H%M%S.log"))
+        os.makedirs(os.path.dirname(self.log_path) or ".", exist_ok=True)
         self._log = open(self.log_path, "a", encoding="utf-8")
 
     def log(self, kind, text=""):
@@ -94,8 +95,13 @@ class Transport:
             self.on_disconnect()
 
     async def disconnect(self):
-        if self.client and self.client.is_connected:
-            await self.client.disconnect()
+        if self.client:
+            try:
+                # Also after the band dropped us: bleak then still holds the GATT service objects
+                # (it is a no-op when there is nothing left to release). A 24 h run reconnects often.
+                await self.client.disconnect()
+            except Exception as e:
+                self.log("EVT", f"disconnect error {e!r}")
         self._log.close()
 
     async def send(self, frame: bytes):

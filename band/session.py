@@ -65,14 +65,36 @@ def _tlv_of(tags) -> TLV:
     return tlv
 
 
+def agreements(now_ms: int) -> TLV:
+    outer = TLV()
+    for name in ("software_update_service_statement", "device_information_management", "user_license_agreement"):
+        outer.put(0x82, TLV().put(3, name).put_u8(4, 1).put(5, "20230508-20230508-0-0").put(6, str(now_ms)))
+    return TLV().put(0x81, outer)
+
+
+def setup_messages(name: str, now_ms: int) -> list[tuple[int, int, TLV]]:
+    """protocol.md section 5, "Required post-init setup", in the order Gadgetbridge sends them."""
+    return [
+        (0x1A, 0x05, TLV().put_u8(1, 0).put_u8(3, 1)),
+        (1, 0x31, _tlv_of(range(1, 7))),
+        (1, 0x30, agreements(now_ms)),
+        (1, 0x3F, TLV().put(1, bytes.fromhex("FDF7737A"))),
+        (1, 0x3E, TLV().put_u8(1, 1).put(2, name).put_u8(3, 0)),  # the band never replies to this one
+        (1, 0x3D, TLV().put(1)),
+        (1, 0x35, TLV().put_u8(1, 1)),
+    ]
+
+
 class Session:
-    def __init__(self, config_path="config/band.json", log_dir="logs", on_prompt=print, on_message=None):
+    def __init__(self, config_path="config/band.json", log_dir="logs", on_prompt=print, on_message=None,
+                 log_path=None):
         self.config_path = Path(config_path)
         self.config = json.loads(self.config_path.read_text())
         if "android_id" not in self.config:
             self.config["android_id"] = crypto.random_bytes(16).hex().upper()
             self.save_config()
         self.log_dir = log_dir
+        self.log_path = log_path
         self.on_prompt = on_prompt
         self.on_message = on_message
         self.transport = None
@@ -80,6 +102,7 @@ class Session:
         self.slice_size = 0x3FE
         self.model = ""
         self.battery = None
+        self.last_error = None
         self.services = {}
         self.disconnected = asyncio.Event()
         self._loop = None
@@ -171,7 +194,8 @@ class Session:
 
     async def start(self):
         self._loop = asyncio.get_running_loop()
-        self.transport = Transport(self.config["address"], self.log_dir, on_disconnect=self._on_disconnect)
+        self.transport = Transport(self.config["address"], self.log_dir, on_disconnect=self._on_disconnect,
+                                   log_path=self.log_path)
         await self.transport.connect()
         self._reader = asyncio.create_task(self._read_loop())
         try:
@@ -223,6 +247,14 @@ class Session:
         self.services = {svc: bool(flag) for svc, flag in zip(SERVICES, p.get(2, b""))}
         cfg["expand_caps"] = (await self.request(1, 0x37, TLV().put(1))).tlv.get(1).hex().upper()
         self.save_config()
+        # Without these the band revokes the session ~25 s after connect (protocol.md section 5).
+        for svc, cmd, tlv in setup_messages(cfg.get("name", ""), time.time_ns() // 1_000_000):
+            if (svc, cmd) == (1, 0x3E):
+                await self.send(svc, cmd, tlv)
+                continue
+            t = (await self.request(svc, cmd, tlv)).tlv
+            if t.get_int(0x7F, 0x186A0) != 0x186A0:  # logged only: the band may still accept the rest
+                self.transport.log("EVT", f"setup {svc:02X}/{cmd:02X} rejected, 7F={t.get_int(0x7F):X}")
 
     async def read_battery(self) -> int | None:
         """Battery %, or None when the band answers with only an error code (7F), e.g. 0x186A4 seen ~60 s in."""

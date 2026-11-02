@@ -1,6 +1,9 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
 
-from band.transport import FrameAssembler, chunks
+from band.transport import FrameAssembler, Transport, chunks
 
 LINK_PARAMS = bytes.fromhex("5A000B0001010100020003000400F13B")
 REPLY_PARTS = [  # real Band 11 link-params reply, as three notifications
@@ -16,6 +19,26 @@ class ChunksTest(unittest.TestCase):
         parts = chunks(frame, 20)
         self.assertEqual([len(p) for p in parts], [20, 20, 9])
         self.assertEqual(b"".join(parts), frame)
+
+
+class LogPathTest(unittest.TestCase):
+    def test_given_log_path_is_appended_to_by_every_transport(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "logs", "run.log")
+            for n in (1, 2):
+                t = Transport("AA:BB", log_path=path)
+                t.log("EVT", f"session {n}")
+                t._log.close()
+            self.assertEqual(t.log_path, path)
+            self.assertEqual([line.split(" ", 2)[2] for line in Path(path).read_text().splitlines()],
+                             ["EVT session 1", "EVT session 2"])
+
+    def test_default_log_path_is_new_per_transport_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Transport("AA:BB", log_dir=tmp)
+            t._log.close()
+            self.assertRegex(os.path.basename(t.log_path), r"^ble-\d{8}-\d{6}\.log$")
+            self.assertEqual(os.path.dirname(t.log_path), tmp)
 
 
 class FrameAssemblerTest(unittest.TestCase):
