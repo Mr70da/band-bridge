@@ -139,6 +139,81 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ConnectionError):
             await self.s.request(1, 8, TLV().put(1))
 
+    def p2p_data(self):  # the band's packet from test_p2p_ack_for_the_real_band_packet
+        return msg(0x34, 1, TLV().put_u8(1, 2).put_u16(2, 5).put(3, "com.huawei.watch.home")
+                   .put(4, "hw.unitedevice.smsquick").put(7, bytes.fromhex("010400001B598200")))
+
+    async def waiting(self, predicate, timeout=1):
+        task = asyncio.create_task(self.s.wait_for(predicate, timeout))
+        await asyncio.sleep(0)  # let it register
+        return task
+
+    async def test_wait_for_takes_the_message_but_the_automatic_replies_still_go_out(self):
+        seen = []
+        self.s.on_message = seen.append
+        p2p = await self.waiting(lambda m: (m.service, m.command) == (0x34, 1))
+        phone = await self.waiting(lambda m: (m.service, m.command) == (1, 0x10))
+        m1, m2 = self.p2p_data(), msg(1, 0x10, empty_tags(0x02, 0x04))
+        await self.s._handle(m1)
+        await self.s._handle(m2)
+        self.assertIs(await p2p, m1)
+        self.assertIs(await phone, m2)
+        self.assertEqual(seen, [])  # consumed, not passed on
+        sent = [Reassembler().feed(f) for f in self.sent]
+        self.assertEqual([(m.service, m.command) for m in sent], [(0x34, 1), (1, 0x10)])
+        self.assertEqual(sent[0].tlv.get_int(1), 3)  # the cmdId 3 ack
+        self.assertEqual(sent[1].tlv.items, [(0x02, b""), (0x04, b"")])
+        self.assertEqual(self.s._waiters, [])
+
+    async def test_a_message_no_waiter_wants_goes_to_on_message(self):
+        seen = []
+        self.s.on_message = seen.append
+        waiter = await self.waiting(lambda m: m.service == 9)
+        m = msg(0x25, 1, TLV().put_u8(1, 7))
+        await self.s._handle(m)
+        self.assertEqual(seen, [m])
+        self.assertFalse(waiter.done())
+        waiter.cancel()
+
+    async def test_first_matching_waiter_wins(self):
+        first = await self.waiting(lambda m: True)
+        second = await self.waiting(lambda m: True)
+        a, b = msg(0x25, 1, TLV().put_u8(1, 1)), msg(0x25, 1, TLV().put_u8(1, 2))
+        await self.s._handle(a)
+        await self.s._handle(b)  # `first` is done but has not run its cleanup yet: it must be skipped
+        self.assertIs(await first, a)
+        self.assertIs(await second, b)
+
+    async def test_pending_request_has_priority_over_a_waiter(self):
+        waiter = await self.waiting(lambda m: True)
+        call = asyncio.create_task(self.s.request(1, 8, TLV().put(1)))
+        while not self.sent:
+            await asyncio.sleep(0)
+        reply = msg(1, 8, TLV().put_u8(1, 99))
+        await self.s._handle(reply)
+        self.assertIs(await call, reply)
+        self.assertFalse(waiter.done())
+        waiter.cancel()
+
+    async def test_wait_for_timeout(self):
+        with self.assertRaisesRegex(TimeoutError, "no matching message"):
+            await self.s.wait_for(lambda m: False, 0.01)
+        self.assertEqual(self.s._waiters, [])
+
+    async def test_disconnect_fails_waiters_at_once(self):
+        self.s._loop = asyncio.get_running_loop()
+        waiter = await self.waiting(lambda m: True)
+        await asyncio.to_thread(self.s._on_disconnect)
+        with self.assertRaisesRegex(ConnectionError, "disconnected"):
+            await waiter
+        with self.assertRaises(ConnectionError):
+            await self.s.wait_for(lambda m: True, 1)
+
+    async def test_p2p_sequence_starts_at_1_and_wraps_at_u16(self):
+        self.assertEqual([self.s.next_p2p_seq() for _ in range(3)], [1, 2, 3])
+        self.s.p2p_seq = 0xFFFF
+        self.assertEqual(self.s.next_p2p_seq(), 0)
+
     async def test_android_id_is_created_and_saved(self):
         self.path.write_text(json.dumps({"address": "AA:BB:CC:DD:EE:FF"}))
         s = Session(self.path, "unused")

@@ -146,6 +146,24 @@ class SupervisorTest(unittest.IsolatedAsyncioTestCase):
         await self.until(s.ready.is_set)
         self.assertEqual(len(self.make.made), 2)
 
+    async def test_on_ready_runs_before_ready_and_a_failure_reconnects(self):
+        calls = []
+
+        async def on_ready(session):
+            calls.append((session, s.ready.is_set()))
+            if len(calls) == 1:
+                raise RuntimeError("setup failed")
+
+        s = self.sup({}, {}, on_ready=on_ready)
+        await self.until(s.ready.is_set)
+        first, second = self.make.made
+        self.assertEqual(calls, [(first, False), (second, False)])  # "ready" is only set once the setup passed
+        self.assertTrue(first.closed)
+        self.assertEqual(s.stats["connects"], 1)
+        self.assertIn("setup failed", s.stats["last_error"])
+        await self.until(lambda: second.beats >= 1)
+        self.assertEqual(len(calls), 2)  # not repeated by the heartbeat
+
     async def test_stop_while_ready(self):
         s = self.sup({})
         await self.until(s.ready.is_set)

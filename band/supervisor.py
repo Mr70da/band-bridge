@@ -12,9 +12,10 @@ class Supervisor:
 
     def __init__(self, config_path="config/band.json", log_dir="logs", on_state=None, on_prompt=print,
                  on_message=None, heartbeat=60, connect_timeout=60, backoff=(2, 4, 8, 16, 30, 60),
-                 session_factory=Session, close_timeout=10):
+                 session_factory=Session, close_timeout=10, on_ready=None):
         self.config_path, self.log_dir = config_path, log_dir
         self.on_state, self.on_prompt, self.on_message = on_state, on_prompt, on_message
+        self.on_ready = on_ready  # async callable(session), per-connection setup; failing it counts as a failed connect
         self.heartbeat, self.connect_timeout, self.backoff = heartbeat, connect_timeout, backoff
         self.session_factory, self.close_timeout = session_factory, close_timeout
         self.state = "stopped"
@@ -67,6 +68,8 @@ class Supervisor:
                                                    log_path=self.log_path)
                     # a hung connect or auth is aborted here and retried
                     await asyncio.wait_for(session.start(), self.connect_timeout)
+                    if self.on_ready:  # before "ready", so waiting on it means the band is set up
+                        await asyncio.wait_for(self.on_ready(session), self.connect_timeout)
                     failures = 0
                     self._ready(session)
                     await self._watch(session)

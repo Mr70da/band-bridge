@@ -443,6 +443,17 @@ Band 11 [log, lines 2009-2204]:
 
 Slot count: Gadgetbridge assumes 10 (a TODO in its source). We need 7.
 
+### 8.4b Verified on our band (Phase 6, FW 6.0.0.130) [log]
+
+- Setup replies:
+  - `02/05` → `01=01`
+  - `02/02` → content limit 500
+  - `02/04` and `02/08` → `7F=186A0`
+- The quick-reply update was acked with `CF`, and reading the list back returned all 7 items.
+- `02/01` with `sourceAppId = org.telegram.messenger`, type `0x7F` and a reply key → `7F=186A0`. The band showed the reply UI, so **no WhatsApp/SMS fallback is needed**.
+- The tap arrived about 9 s later as `02/10`: `01=02` (type 2), `02=02` (UTF-8, not 3), `04=` our key echoed exactly, `06="yes"`. No ack was sent, and the band did not retry.
+- `02/06` remove → `7F=186A0`.
+
 ### 8.5 Remove a notification `02/06`
 
 `01 byte type, 02 str sourceAppId, 03 str notificationKey, 04 int notificationId, 05 str channelId, [06 str category]`. Useful to clear a question after it is answered or times out.

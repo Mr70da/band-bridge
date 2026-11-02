@@ -108,6 +108,12 @@ class Session:
         self._loop = None
         self._reader = None
         self._pending: dict[tuple[int, int], asyncio.Future] = {}
+        self._waiters: list[tuple] = []  # (predicate, future) from wait_for
+        self.p2p_seq = 0
+
+    def next_p2p_seq(self) -> int:
+        self.p2p_seq = (self.p2p_seq + 1) & 0xFFFF  # protocol.md 8.4: our running counter, the band echoes it
+        return self.p2p_seq
 
     def save_config(self):
         tmp = self.config_path.with_name(self.config_path.name + ".tmp")
@@ -144,6 +150,21 @@ class Session:
         finally:
             del self._pending[(svc, cmd)]
 
+    async def wait_for(self, predicate, timeout) -> Message:
+        """The next band message that predicate(msg) accepts. It is not passed to on_message, but the automatic
+        replies (phone info, P2P ack) still go out for it. Call it before sending whatever the band answers."""
+        if self.disconnected.is_set():
+            raise ConnectionError("band disconnected")
+        waiter = (predicate, asyncio.get_running_loop().create_future())
+        self._waiters.append(waiter)
+        try:
+            async with asyncio.timeout(timeout):
+                return await waiter[1]
+        except TimeoutError:
+            raise TimeoutError("no matching message from the band") from None
+        finally:
+            self._waiters.remove(waiter)
+
     async def _read_loop(self):
         asm = Reassembler()
         while True:
@@ -167,7 +188,10 @@ class Session:
         if key in self._pending and not self._pending[key].done():
             self._pending[key].set_result(msg)
             return
-        if self.on_message:
+        waiter = next((w for w in self._waiters if not w[1].done() and w[0](msg)), None)
+        if waiter:
+            waiter[1].set_result(msg)
+        elif self.on_message:
             self.on_message(msg)
         if t is None:
             return
@@ -186,7 +210,7 @@ class Session:
 
     def _drop(self):
         self.disconnected.set()
-        for fut in self._pending.values():
+        for fut in [*self._pending.values(), *(f for _, f in self._waiters)]:
             if not fut.done():
                 fut.set_exception(ConnectionError("band disconnected"))
 
