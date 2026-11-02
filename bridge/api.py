@@ -10,8 +10,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from band.services.music import MusicService
+from band.services.weather import WeatherService
 from band.services.notifications import Notifier
 from band.supervisor import Supervisor
+from bridge.away_lock import AwayLock
 from bridge.win_notify import NotificationMirror
 
 CONFIG = "config/band.json"
@@ -121,14 +123,17 @@ def create_app(supervisor=None, notifier=None, on_state=None, services=None) -> 
     fakes. on_state only reaches a Supervisor made here. A service's run() lives as long as the app."""
     own = supervisor is None
     notifier = notifier or Notifier()
-    services = list(services if services is not None else [MusicService()] if own else [])
+    cfg = load_config() if own else {}
+    services = list(services if services is not None else
+                    [MusicService(), WeatherService(cfg.get("weather"))] if own else [])
     on_ready, on_message = fan_out(notifier, services)
     sup = supervisor or Supervisor(on_message=on_message, on_ready=on_ready, on_state=chain_on_state(on_state))
     if own:
         async def mirror_send(title, text):
             if sup.session is not None:
                 await notifier.send(sup.session, title, shorten(text, BODY_LIMIT), reply=False)
-        services.append(NotificationMirror(mirror_send, load_config().get("mirror_notifications")))
+        services += [NotificationMirror(mirror_send, cfg.get("mirror_notifications")),
+                     AwayLock(lambda: sup.state, cfg.get("lock_on_leave"))]
     pending: dict[int, asyncio.Future] = {}  # notification id -> raw reply text
     push_lock = asyncio.Lock()
     active = 0  # asks between start and end (pending only counts those already sent)
