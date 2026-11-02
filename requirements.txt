@@ -1,0 +1,5 @@
+bleak
+cryptography
+fastapi
+uvicorn
+mcp
