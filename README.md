@@ -14,7 +14,7 @@ Probe the band (Phase 2): `.venv\Scripts\python probe.py`
 
 ## Use with Claude Code (Windows)
 
-Start the bridge and keep it running (it binds to 127.0.0.1 only; Phase 8 will autostart it):
+Start the bridge and keep it running (it binds to 127.0.0.1 only; see "Run at startup" below to autostart it with a tray icon):
 
 ```
 .venv\Scripts\python -m bridge.api
@@ -53,6 +53,23 @@ Hooks: a band notification when Claude needs input or is done. Put this in `%USE
 ```
 
 The hook always exits 0, also when the bridge is not running.
+
+## Run at startup (Phase 8)
+
+`tray.py` runs the bridge and a system-tray dot in one process. Install it as a logon task for the current user (no admin rights):
+
+```
+powershell -ExecutionPolicy Bypass -File install_startup.ps1
+powershell -ExecutionPolicy Bypass -File uninstall_startup.ps1
+```
+
+The task `BandBridge` starts `.venv\Scripts\pythonw.exe tray.py` at logon, restarts it up to 3 times (1 minute apart) if it fails, and has no time limit. Start it without logging out: `Start-ScheduledTask -TaskName BandBridge`.
+
+Tray dot: green = ready, amber = connecting or waiting to retry, red = needs pairing, stopped or error (hover for the state and battery; a pairing notice says to run `connect.py`). Menu: Status (state, battery, connects/disconnects), Open log folder, Quit (closes the BLE session first).
+
+Logs are in `logs\`: `bridge-YYYYmmdd.log` (the bridge and the tray) and `ble-*.log` (BLE packets).
+
+Run only one of `tray.py` and `python -m bridge.api`: both use port 8765 and the band's single BLE connection.
 
 ## Credits
 

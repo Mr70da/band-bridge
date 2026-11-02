@@ -56,13 +56,21 @@ def error(status, message, **extra):
     return JSONResponse({"error": message, **extra}, status_code=status)
 
 
-def create_app(supervisor=None, notifier=None) -> FastAPI:
-    """Without arguments it talks to the real band; tests pass fakes."""
+def chain_on_state(extra=None):
+    """Log every state change, then call extra(state, detail) (the tray) if given."""
+    def on_state(state, detail):
+        log.info("band %s %s", state, detail)
+        if extra:
+            extra(state, detail)
+    return on_state
+
+
+def create_app(supervisor=None, notifier=None, on_state=None) -> FastAPI:
+    """Without arguments it talks to the real band; tests pass fakes. on_state only reaches a Supervisor made here."""
     own = supervisor is None
     notifier = notifier or Notifier()
     sup = supervisor or Supervisor(
-        on_message=notifier.on_message, on_ready=notifier.setup,
-        on_state=lambda state, detail: log.info("band %s %s", state, detail))
+        on_message=notifier.on_message, on_ready=notifier.setup, on_state=chain_on_state(on_state))
     pending: dict[int, asyncio.Future] = {}  # notification id -> raw reply text
 
     def on_reply(nid, text, key):
