@@ -7,8 +7,11 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import threading
 import urllib.request
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 
@@ -57,9 +60,11 @@ class Tray:
         self.stopped = threading.Event()
         self.icon = pystray.Icon("band-bridge", dot(RED), tooltip(self.state), pystray.Menu(
             pystray.MenuItem("Status", self.show_status),
+            pystray.MenuItem("Open dashboard", lambda: webbrowser.open(f"http://127.0.0.1:{PORT}/dashboard")),
+            pystray.MenuItem("Show widget", self.show_widget),
             pystray.MenuItem("Open log folder", lambda: os.startfile(Path("logs").resolve())),
             pystray.MenuItem("Quit", self.quit)))
-        self.server = None
+        self.server = self.widget = None
 
     def on_state(self, state, detail=""):  # called from the server thread
         self.state = state
@@ -104,6 +109,12 @@ class Tray:
         except Exception as e:
             text = f"{tooltip(self.state, self.battery)} (API not answering: {e!r})"
         self.icon.notify(text, "Band Bridge")
+
+    def show_widget(self):  # once: a second click while it runs does nothing
+        if self.widget and self.widget.poll() is None:
+            return
+        pyw = Path(sys.executable).with_name("pythonw.exe")
+        self.widget = subprocess.Popen([str(pyw if pyw.exists() else sys.executable), "widget.py"])
 
     def serve(self):
         import uvicorn

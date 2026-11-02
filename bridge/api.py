@@ -9,10 +9,13 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from band.fitness_store import FitnessStore
+from band.services.fitness import FitnessService
 from band.services.music import MusicService
 from band.services.weather import WeatherService
 from band.services.notifications import Notifier
 from band.supervisor import Supervisor
+from bridge import dashboard
 from bridge.away_lock import AwayLock
 from bridge.win_notify import NotificationMirror
 
@@ -118,14 +121,15 @@ def load_config(path=CONFIG) -> dict:
         return {}
 
 
-def create_app(supervisor=None, notifier=None, on_state=None, services=None) -> FastAPI:
+def create_app(supervisor=None, notifier=None, on_state=None, services=None, store=None) -> FastAPI:
     """Without arguments it talks to the real band (with music control and the notification mirror); tests pass
     fakes. on_state only reaches a Supervisor made here. A service's run() lives as long as the app."""
     own = supervisor is None
     notifier = notifier or Notifier()
     cfg = load_config() if own else {}
-    services = list(services if services is not None else
-                    [MusicService(), WeatherService(cfg.get("weather"))] if own else [])
+    store = store or (FitnessStore() if own else FitnessStore(":memory:"))
+    services = list(services if services is not None else [
+        MusicService(), WeatherService(cfg.get("weather")), FitnessService(store, cfg.get("fitness"))] if own else [])
     on_ready, on_message = fan_out(notifier, services)
     sup = supervisor or Supervisor(on_message=on_message, on_ready=on_ready, on_state=chain_on_state(on_state))
     if own:
@@ -161,6 +165,8 @@ def create_app(supervisor=None, notifier=None, on_state=None, services=None) -> 
             await asyncio.gather(task, return_exceptions=True)
 
     app = FastAPI(title="Band Bridge", lifespan=lifespan)
+    app.include_router(dashboard.router(store, status=lambda: {
+        "state": sup.state, "battery": getattr(sup.session, "battery", None)}))
 
     async def ready_session(wait):
         try:

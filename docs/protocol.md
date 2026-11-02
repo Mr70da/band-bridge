@@ -494,6 +494,20 @@ Band-initiated messages:
 - `0F/04` with `7F=186AA` means "send weather".
 - `0F/03 {01=0001}` is unknown, and Gadgetbridge ignores it.
 
+## 8e. Activity, sleep, SpO2, stress sync [src: Gadgetbridge FitnessData, FileDownloadService2C; log 2026-11-02]
+
+This was verified live with fitness_probe.py, and the code is in band/services/fitness.py, which carries the full layouts in its comments.
+
+| Request | Band 11 answer |
+|---|---|
+| `07/03` today's totals | OK. `81{83{05 steps u32, 06 kcal u16, 07 m u32}...}` summed. |
+| `07/0A` sample count `{81, 03 start, 04 end}` → `07/0B` chunk i | OK: 7 chunks and 194 minute records with steps, kcal, m and heart rate. Data starts when the band was paired; it keeps no history from before. |
+| `07/0C`/`07/0D` legacy sleep | It answers, with items of type `01` that are not sleep stages (06 light, 07 deep). It is unused for now. |
+| `2C/01` file `sequence_data` type 0x16 (sleep) | OK. Size 0 until a night has been recorded. |
+| `2C/01` file `rrisqi_data.bin` type 0x10 (stress) | OK. Size 0: no automatic stress readings yet. |
+
+SpO2 arrives only inside the `07/0B` records, through the second bitmap. Still to verify: sleep and stress after a real night with automatic stress on, and SpO2 values.
+
 ## 8c. Heart rate: not available [src + log]
 
 `07/1C {01=bool}` (Gadgetbridge `EnableRealtimeHeartRate`) is **not** a live reading. Gadgetbridge sends it in place of `07/17` (automatic HR) when "realtime mode" is set: it switches **continuous HR monitoring** on or off. On 2026-11-02, with the switch on and `2A37` (standard Heart Rate Measurement) subscribed for 40 s, no reading arrived; the band sent only `07/0F {01=03, 02=00000000}`. Gadgetbridge has no live HR read for Huawei, so Band Bridge does not offer one. Never send `07/1C 00`: it turns off the user's monitoring.
