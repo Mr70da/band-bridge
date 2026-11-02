@@ -56,6 +56,7 @@ Advertised as `HUAWEI Band 11-XXX` (e.g. `HUAWEI Band 11-2BF`). Gadgetbridge mat
 
 - **Write chunking [log]:** Link Params returns `mtu = 0x0014` (20). Gadgetbridge splits every outgoing frame into 20-byte writes (`requests/Request.java`, `doPerform`). Example: a 49-byte frame (`LEN = 0x2C`) goes out as 20 + 20 + 9 bytes (log lines 55-60). Before Link Params arrives, mtu defaults to 65535, so the first request (16 bytes) goes out whole.
 - **Notification reassembly [log]:** the band also sends 20-byte notifications. A frame is complete when `3 + length + 2` bytes have arrived (section 3). Buffer partial data, and keep any trailing bytes after a frame as the start of the next one (`HuaweiPacket.parseData`, `getLeft()`).
+- **Windows (Phase 2, real band) [log]:** Windows negotiates ATT MTU 517. The band then reports Link Params `mtu = 0x0202` (514 = 517 − 3) instead of 20, and sends its 58-byte reply as **one** notification. So the band's MTU follows the ATT MTU. Set the write chunk size from the Link Params `mtu` (Phase 2 still uses 20; the first request fits either way). The reassembler must handle both 1-notification and multi-notification frames.
 - **Interval:** Link Params tag `0x04` = `0x0000` on Band 11, so there is no wait between requests.
 - **Write type:** `FE01` is writeNoResponse only → bleak `write_gatt_char(..., response=False)`.
 - **Ordering:** Gadgetbridge serializes all writes through one queue. Do the same, and never interleave chunks of two frames.

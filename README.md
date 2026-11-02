@@ -10,6 +10,8 @@ py -3.13 -m venv .venv
 .venv\Scripts\python scan.py
 ```
 
+Probe the band (Phase 2): `.venv\Scripts\python probe.py`
+
 ## Credits
 
 Protocol work is ported from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge) (AGPL-3.0). [huawei-lpv2](https://github.com/zyv/huawei-lpv2) is used as a structural reference.
