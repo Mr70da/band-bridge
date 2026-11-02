@@ -196,7 +196,7 @@ Auth type math (`DeviceConfig.SecurityNegotiation.Response.parseTlv`): tag1 = 4 
 
 ### Step 3: PIN code `01/2C` (first pairing only)
 
-Request: `01 00`. The response carries an **encrypted PIN**, not a code for the user to type:
+Request: `01 00`. Nothing shows on the band screen for this request (Phase 3, real band). The pairing prompt comes later, at HiChain op 1 step 1. The response carries an **encrypted PIN**, not a code for the user to type:
 - `01` = ciphertext (80 bytes on Band 11), `02` = IV (16 bytes).
 - Decrypt (`HuaweiCrypto.decryptPinCode`): AES-128-**CBC**/PKCS7 (encryptMethod 0), key = `DIGEST_SECRET_v1` (authVersion 1), IV = tag `02`.
 - `DIGEST_SECRET_v1 = 70 FB 6C 24 03 5F DB 55 2F 38 89 8A EE DE 3F 69`
