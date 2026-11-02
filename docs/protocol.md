@@ -44,7 +44,12 @@ Connect order (from `HuaweiSupportProvider.initializeDevice`):
 
 - Gadgetbridge does **not** bond at the OS level (`HuaweiLECoordinator.getBondingStyle() = BONDING_STYLE_NONE`). The band's link-layer security is replaced by HiChain (section 6).
 - During the first HiChain exchange, the band sent an SMP pairing request. Gadgetbridge rejected it (`BluetoothPairingRequestReceiver - Aborting unwanted pairing request`, log line 194), and pairing still succeeded.
-- **Windows impact [verify]:** Windows may show a "pair device?" prompt at that moment. The plan is to ignore or decline it, same as Gadgetbridge. If the band then drops after about 20 s, try OS pairing as a fallback (see section 10).
+- **The 30-second drop [log, both Gadgetbridge logs + our Phase 4 run]:** the band sends that SMP pairing request **only during HiChain op 1 (first pairing), never on op-2-only reconnects**. The first-pairing connection then **always drops exactly 30 s later**, which is the Bluetooth SMP timeout:
+  - gb6012: `14:02:50.188 → 14:03:20.212`, `14:03:24.648 → 14:03:54.535`
+  - gb5930: `20:18:53.020 → 20:19:22.988`
+  - ours (Windows): approve at `19:03:35.9` → drop at `19:04:05.995`
+
+  This is the #6012 "GATT_VALUE_NOT_ALLOWED loop". Gadgetbridge never resets its `firstConnection` flag, so every auto-reconnect re-runs op 1, which triggers SMP again and another 30 s drop. **For us:** save `auth_token` right after op 1 step 3, expect the drop, and reconnect with op 2 only. That reconnect gets no SMP request and stays up. No OS pairing is needed.
 
 ### Device name
 
@@ -229,7 +234,12 @@ Band 11 expand capabilities [log]: `FF7F014226C37442A0A6BC7222698A4B87AAA10D6EFD
 
 ### Band-initiated messages after init [log]
 
-Right after init the band sends: `01/10` (phone info request), `37/xx`, `0F/xx` (weather), `34/01` (P2P), `08/08`, `25/01` (music), `32/02`. Gadgetbridge answers `01/10` (`AsynchronousResponse.handlePhoneInfo`, `GetPhoneInfoRequest`) and acks every P2P data/ping (section 8.4). **[verify]** which of these the band needs answered to stay connected. Start by answering `01/10` and P2P and logging the rest.
+**Our band, FW `6.0.0.130(SP3C00M03)`, model `Candy-B19FB` (Phase 4) [log]:**
+- First pairing: after init it sent `37/02` (`hw.wearable.httpProxy` → `hw.unitedevice.httpProxy`), `01/3D` (tag1 = 2, then 1), `37/01` (`com.huawei.watch.home` → `com.huawei.wearengine`) twice, and `25/03` (tag1 = `64`). Reconnects only sent `25/03` about 25 s in.
+- None of these was answered and the link stayed up 12 min. No `01/10` or `34/01` arrived, because we skip Gadgetbridge's dynamic-services init.
+- Battery `01/08` works during init. **Every later `01/08` (from about 60 s on) gets a plaintext `7F = 0x000186A4` reject**, yet the link stays up. Gadgetbridge only polls every 15 min, so its logs don't show this. Cause unknown (see section 11). Any reply still proves liveness.
+
+In the Gadgetbridge logs, right after init the band sends: `01/10` (phone info request), `37/xx`, `0F/xx` (weather), `34/01` (P2P), `08/08`, `25/01` (music), `32/02`. Gadgetbridge answers `01/10` (`AsynchronousResponse.handlePhoneInfo`, `GetPhoneInfoRequest`) and acks every P2P data/ping (section 8.4). **[verify]** which of these the band needs answered to stay connected. Start by answering `01/10` and P2P and logging the rest.
 
 ---
 
@@ -447,11 +457,12 @@ Never log `auth_token` or the per-connection `secretKey` except at an explicit d
 
 ## 11. Open questions to verify on the real band
 
-1. Does Windows show an OS pairing prompt during HiChain, and does declining it keep the link (section 1)?
+1. ~~Does declining the OS pairing keep the link?~~ Answered: no. The first-pairing link always drops 30 s after the SMP request, and reconnects never get one (section 1).
 2. Does the band need answers to `01/10` phone info and other band-initiated requests to stay connected (section 5)?
 3. Does the band show the reply UI for a non-whitelisted `sourceAppId` (section 8.2)?
 4. Reply event: encoding value and exact key echo on Band 11 (section 8.3).
 5. Is the bleak/WinRT negotiated ATT MTU irrelevant? We chunk at 20 regardless.
+6. Why does `01/08` battery return `0x186A4` from about 60 s after init? Do other encrypted commands (notifications `02/01`) still work after that point? Test first thing in Phase 5/6.
 
 ## 12. Test vectors for Phase 3
 

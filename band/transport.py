@@ -45,10 +45,11 @@ class FrameAssembler:
 
 
 class Transport:
-    def __init__(self, address, log_dir="logs", chunk_size=20, on_frame=None):
+    def __init__(self, address, log_dir="logs", chunk_size=20, on_frame=None, on_disconnect=None):
         self.address = address
         self.chunk_size = chunk_size
         self.on_frame = on_frame
+        self.on_disconnect = on_disconnect
         self.frames: asyncio.Queue[bytes] = asyncio.Queue()
         self.client = None
         self._asm = FrameAssembler()
@@ -69,7 +70,7 @@ class Transport:
         # use_cached_services=False: the band was reset, so an old Windows GATT cache could be stale.
         self.client = BleakClient(
             self.address,
-            disconnected_callback=lambda _: self.log("EVT", "disconnected"),
+            disconnected_callback=self._on_disconnected,
             winrt=dict(use_cached_services=False),
         )
         try:
@@ -86,6 +87,11 @@ class Transport:
             self.log("EVT", f"error {e!r}")
             await self.disconnect()
             raise
+
+    def _on_disconnected(self, _client):
+        self.log("EVT", "disconnected")
+        if self.on_disconnect:
+            self.on_disconnect()
 
     async def disconnect(self):
         if self.client and self.client.is_connected:
