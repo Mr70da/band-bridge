@@ -50,7 +50,7 @@ Protocol details and evidence levels are in [docs/protocol.md](docs/protocol.md)
 ## Install
 
 ```
-git clone <this repository's URL>
+git clone https://github.com/Mr70da/band-bridge.git
 cd band-bridge
 py -3.13 -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
