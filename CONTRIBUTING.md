@@ -12,7 +12,7 @@ py -3.13 -m venv .venv
 ## Tests
 
 ```
-.venv\Scripts\python -m pytest tests
+.venv\Scripts\python -m unittest discover -s tests
 ```
 CI runs the unit tests on windows-latest. They need no band.
 

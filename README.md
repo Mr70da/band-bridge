@@ -1,53 +1,102 @@
-# Band Bridge
+<p align="center">
+  <img src="docs/img/banner.svg" alt="Band Bridge: Claude Code on your wrist" width="100%">
+</p>
 
-Band Bridge connects a Huawei Band 11 directly to a Windows PC over Bluetooth LE, with no phone and no Huawei Health. Its main job is to put Claude Code on your wrist: questions, permission prompts and "what next?" choices appear on the band, and a tap sends the answer back. It also turns the band into a PC accessory (notifications, music remote, lock when you leave) and syncs your health data into a local dashboard.
+<p align="center">
+  <a href="https://github.com/Mr70da/band-bridge/actions/workflows/tests.yml"><img src="https://github.com/Mr70da/band-bridge/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4" alt="Windows 10/11">
+  <img src="https://img.shields.io/badge/python-3.13-3776ab" alt="Python 3.13">
+  <img src="https://img.shields.io/badge/Huawei%20Band-11-c7000b" alt="Huawei Band 11">
+</p>
+
+<p align="center">
+  <b>Answer Claude Code from your wrist.</b> Band Bridge connects a Huawei Band 11 straight to your Windows PC over Bluetooth LE.<br>
+  No phone. No Huawei Health. Questions, permission prompts and "what next?" choices show up on the band, and one tap sends the answer back.
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#use-with-claude-code">Claude Code</a> ·
+  <a href="#dashboard-and-widget">Dashboard</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#troubleshooting">Troubleshooting</a>
+</p>
+
+---
+
+## See it
+
+<p align="center">
+  <img src="docs/img/band-screens.svg" alt="Illustration of four band screens: a question with option replies, a permission prompt, the next-step choice and the session board" width="100%">
+</p>
+
+You start a long task, walk away, and your wrist tells you what Claude needs. Tap a reply and it carries on.
+
+## How it works
+
+```mermaid
+flowchart LR
+    CC["Claude Code<br/>hooks + MCP tools"] -- "localhost API<br/>127.0.0.1:8765" --> BB["Band Bridge<br/>tray app"]
+    BB <-- "Bluetooth LE<br/>encrypted" --> Band(["Huawei Band 11"])
+    BB --> Web["Dashboard + desktop widget"]
+    BB --> DB[("data/fitness.db")]
+    WIN["Windows<br/>toasts, media, idle time"] <--> BB
+```
+
+- Band Bridge pairs with the band like the Huawei phone app does and keeps one BLE connection alive, reconnecting on its own.
+- Claude Code talks to it through hooks and an MCP server. Replies come back as the band's quick-reply taps.
+- Everything stays on your PC. The API only listens on `127.0.0.1`.
 
 ## Features
 
-**Claude Code on your wrist**
-- `ask_on_band`: Claude asks a question on the band; the options you give become the reply list, so you tap "Run tests" instead of "2" (up to 5 options; numbers still work).
-- Permission prompts: when you are away, Claude Code's permission dialog is asked on the band with Allow / Deny. An error never allows.
-- Wrist remote: when Claude finishes while you are away, the band asks "Next?" (Keep going / Run tests / Commit / Stop) and Claude continues with your choice.
-- Stuck detector: after 3 failed commands in a row while you are away, the band asks Keep going / Try another way / Stop.
-- Danger guard: force-push, hard reset, recursive deletes, DROP/TRUNCATE, terraform destroy and similar commands need an Allow on the band, even when you are at the PC. Fails closed.
-- Session board: one band notification lists every running Claude session (waiting, done, working).
+<details open>
+<summary><b>Claude Code on your wrist</b></summary>
 
-**Band as a PC accessory**
+- **`ask_on_band`**: Claude asks a question on the band. The options you give become the reply list, so you tap "Run tests" instead of "2" (up to 5 options; numbers still work).
+- **Permission prompts**: when you are away, Claude Code's permission dialog is asked on the band with Allow / Deny. An error never allows.
+- **Wrist remote**: when Claude finishes while you are away, the band asks "Next?" (Keep going / Run tests / Commit / Stop) and Claude continues with your choice.
+- **Stuck detector**: after 3 failed commands in a row while you are away, the band asks Keep going / Try another way / Stop.
+- **Danger guard**: force-push, hard reset, recursive deletes, DROP/TRUNCATE, terraform destroy and similar commands need an Allow on the band, even when you are at the PC. It fails closed.
+- **Session board**: one band notification lists every running Claude session (waiting, done, working).
+
+</details>
+
+<details open>
+<summary><b>The band as a PC accessory</b></summary>
+
 - Windows notifications mirrored to the band while you are away.
-- Music controls for whatever the PC is playing: play/pause, 10 s seek on previous/next, double tap for track change, volume slider.
-- Current weather (Open-Meteo, no API key).
+- Music controls for whatever the PC is playing: play/pause, 10 s seek on previous/next, double tap for track change, a volume slider.
+- Current weather from Open-Meteo (no API key).
 - Lock the PC when you walk away with the band.
 - System tray icon with connection state and battery.
 
-**Health dashboard**
+</details>
+
+<details open>
+<summary><b>Health dashboard</b></summary>
+
 - Steps, calories, distance, heart rate, sleep, SpO2 and stress, synced every 15 minutes into a local SQLite file.
-- Web dashboard plus an always-on-top desktop widget.
+- A web dashboard and an always-on-top desktop widget. [Screenshots below.](#dashboard-and-widget)
 
-## Status and tested hardware
+</details>
 
-Tested on: Huawei Band 11, firmware 6.0.0.130, Windows 11, a standard Bluetooth LE adapter. Other Huawei bands may work but are untested.
+> [!NOTE]
+> **Status:** tested on a Huawei Band 11 (firmware 6.0.0.130) with Windows 11 and a standard Bluetooth LE adapter. Other Huawei bands may work but are untested.
+>
+> Known limits: the band rejects the weather forecast, so only current weather is shown. Sleep, SpO2 and stress only appear if the band recorded them. Heart rate on demand is not possible; you get the values the band records.
+>
+> Protocol details and how well each part is verified are in [docs/protocol.md](docs/protocol.md).
 
-Known limits:
-- The band rejects the weather forecast, so only current weather is shown.
-- Sleep, SpO2 and stress only appear if the band recorded them (wear it, enable the measurements on the band).
-- Heart rate on demand is not possible; you get the values the band records.
+> [!IMPORTANT]
+> **Safety:** Band Bridge never flashes or modifies firmware. It only sends BLE application-level messages, as the Huawei phone app does. The pairing key lives in `config/band.json`, which is gitignored. Never share or commit that file.
 
-Protocol details and evidence levels are in [docs/protocol.md](docs/protocol.md).
+## Quick start
 
-## Safety
+**You need:** Windows 10/11 with a Bluetooth LE adapter, Python 3.13 (`py` launcher), Claude Code for the Claude features, and a Huawei Band 11 that is not connected to a phone (a band talks to one host at a time).
 
-- It never flashes or modifies firmware. It only sends BLE application-level messages, as the Huawei phone app does.
-- Everything is local: the bridge listens on `127.0.0.1` only. The only outside request is the weather lookup.
-- The pairing key is stored in `config/band.json`, which is gitignored. Never share or commit that file.
-
-## Requirements
-
-- Windows 10/11 with a Bluetooth LE adapter
-- Python 3.13 (`py` launcher)
-- Claude Code (for the Claude features)
-- A Huawei Band 11, not currently connected to a phone (a band connects to one host at a time)
-
-## Install
+### 1. Install
 
 ```
 git clone https://github.com/Mr70da/band-bridge.git
@@ -58,65 +107,106 @@ py -3.13 -m venv .venv
 
 All commands below run from the repository root.
 
-## Pair
+### 2. Pair
 
-1. Put the band in pairing mode and disconnect/unpair it from any phone or Huawei Health (the band talks to one host at a time). Keep it next to the PC.
-2. Find it:
+1. Put the band in pairing mode and disconnect or unpair it from any phone or Huawei Health. Keep it next to the PC.
+2. Find it. This lists nearby devices and highlights `HUAWEI Band 11-XXX`:
    ```
    .venv\Scripts\python tools\scan.py
    ```
-   It lists nearby devices and highlights `HUAWEI Band 11-XXX`.
-3. Pair:
+3. Pair. When the band asks, tap the check mark on it:
    ```
    .venv\Scripts\python tools\connect.py
    ```
-   When the band asks, tap the check mark on it. The key is saved to `config/band.json` (see `config/band.example.json` for the layout; `tools/connect.py` writes the real file, you do not create it by hand).
+   The key is saved to `config/band.json` (see `config/band.example.json` for the layout; `tools/connect.py` writes the real file, you do not create it by hand).
 
-Expected: about 30 seconds after the first pairing the connection drops once. This is normal Bluetooth behavior; the bridge then reconnects with the saved key and stays connected.
+> [!TIP]
+> About 30 seconds after the first pairing the connection drops once. That is normal Bluetooth behavior. The bridge then reconnects with the saved key and stays connected.
 
-## Run
+### 3. Run
 
-Tray app (recommended):
 ```
 .venv\Scripts\pythonw.exe tray.py
 ```
-Start it automatically at logon (current user, no admin rights):
+
+A dot appears in the system tray: **green** = ready, **amber** = connecting or retrying, **red** = needs pairing, stopped or error. The menu has Status, Open dashboard, Show widget, Open log folder and Quit. The tooltip shows the battery, and a toast appears once when it drops below 15%.
+
+<details>
+<summary>Start it automatically at logon, or run it in a console</summary>
+
+Current user, no admin rights:
 ```
 powershell -ExecutionPolicy Bypass -File install_startup.ps1
 powershell -ExecutionPolicy Bypass -File uninstall_startup.ps1
 ```
 The `BandBridge` task restarts the tray up to 3 times if it fails. Start it without logging out: `Start-ScheduledTask -TaskName BandBridge`.
 
-Console mode (logs on screen):
+Console mode, with logs on screen:
 ```
 .venv\Scripts\python -m bridge.api
 ```
 
 Run only one of the two: both use port 8765 and the band's single BLE connection.
 
-Tray dot: green = ready, amber = connecting or retrying, red = needs pairing, stopped or error. Menu: Status, Open dashboard, Show widget, Open log folder, Quit. The tooltip shows the battery, and a toast appears once when it drops below 15%.
+</details>
 
-## Use with Claude Code
+### 4. Connect Claude Code
 
 ```
 .venv\Scripts\python setup_claude.py
 ```
 
-This registers, in `%USERPROFILE%\.claude\settings.json` and for this checkout:
-- the `band-bridge` MCP server (tools `ask_on_band` and `notify_band`),
-- the hooks: Notification and Stop (`band_notify.py`: notifications and wrist remote), PermissionRequest (`band_permission.py`), PostToolUse/PostToolUseFailure (`band_stuck.py`), PreToolUse (`band_guard.py`) and the session board (`band_session.py`).
+Restart Claude Code and you are done. Details are in the next section.
+
+## Use with Claude Code
+
+`setup_claude.py` registers, in `%USERPROFILE%\.claude\settings.json` and for this checkout:
+
+| What | Where | Does |
+|---|---|---|
+| MCP server `band-bridge` | `bridge/mcp_server.py` | tools `ask_on_band` and `notify_band` |
+| Notification + Stop hooks | `hooks/band_notify.py` | band notifications and the wrist remote |
+| PermissionRequest hook | `hooks/band_permission.py` | Allow / Deny on the band |
+| PostToolUse + PostToolUseFailure hooks | `hooks/band_stuck.py` | the stuck detector |
+| PreToolUse hook | `hooks/band_guard.py` | the danger guard |
+| Session hooks | `hooks/band_session.py` | the session board |
 
 It backs up your settings first and is safe to run again. Options: `--dry-run` (show what would change), `--uninstall` (remove everything it added), `--no-guard` (skip the danger guard).
 
-Then:
-- Restart Claude Code.
-- An ask can wait minutes for a tap, but Claude Code cuts MCP tool calls off at its own limit. Start it with a larger one, for example `set MCP_TOOL_TIMEOUT=600000` (milliseconds).
+<details>
+<summary>Things worth knowing</summary>
+
 - The band only buzzes when you have been away from keyboard and mouse for 60 s. Hooks always exit 0 when the bridge is down, except the guard, which fails closed.
-- Quoted command text such as a commit message also trips the guard; use `git commit -F file` to avoid that.
+- An ask can wait minutes for a tap, but Claude Code cuts MCP tool calls off at its own limit. `setup_claude.py` sets `MCP_TOOL_TIMEOUT=600000` (milliseconds) if you have not set it yourself.
+- Quoted command text such as a commit message also trips the guard. Use `git commit -F file` to avoid that.
+- `setup_claude.py --uninstall` leaves `MCP_TOOL_TIMEOUT` in place, since it may be yours.
+
+</details>
+
+## Dashboard and widget
+
+Open `http://127.0.0.1:8765/dashboard` (tray: Open dashboard) or the desktop widget (tray: Show widget). Data lives in `data/fitness.db`.
+
+<table>
+  <tr>
+    <td valign="top"><img src="docs/img/dashboard.png" alt="The dashboard: step ring, heart rate, SpO2, stress, steps per hour, the last 7 days and last night's sleep stages" width="620"></td>
+    <td valign="top" align="center"><img src="docs/img/widget.png" alt="The always-on-top desktop widget: step ring, calories, distance, sleep, battery, SpO2 and stress" width="260"><br><sub>Desktop widget</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots use demo data.</sub>
+
+Try them without a band:
+```
+.venv\Scripts\python -m bridge.dashboard --demo --port 8799
+.venv\Scripts\python widget.py --demo
+```
+`GET /sessions` shows the Claude session board at any time.
 
 ## Configuration
 
-`config/band.json` (all keys optional except what pairing writes):
+<details>
+<summary><b>config/band.json</b>: all keys optional except what pairing writes</summary>
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -127,7 +217,10 @@ Then:
 | `fitness` | `{"enabled": true, "interval": 900, "delay": 5, "days": 7}` | Sync on/off, seconds between syncs, seconds after connect, days fetched on first run |
 | `steps_goal` | `8000` | Daily step goal in the dashboard |
 
-Environment variables:
+</details>
+
+<details>
+<summary><b>Environment variables</b></summary>
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -140,29 +233,52 @@ Environment variables:
 | `BAND_BRIDGE_REMOTE_TIMEOUT` | `240` | Seconds to wait for the "Next?" answer |
 | `BAND_BRIDGE_GUARD_TIMEOUT` | `120` | Seconds to wait for the guard; no answer blocks the command |
 
-## Dashboard and widget
-
-Open `http://127.0.0.1:8765/dashboard` (tray: Open dashboard) or the desktop widget (tray: Show widget). Data lives in `data/fitness.db`. Try them without a band:
-```
-.venv\Scripts\python -m bridge.dashboard --demo --port 8799
-.venv\Scripts\python widget.py --demo
-```
-`GET /sessions` shows the Claude session board at any time.
+</details>
 
 ## Troubleshooting
 
-- **Band not found**: make sure it is not connected to a phone, is close to the PC, and that Bluetooth is on. Run `tools\scan.py` to see if it advertises.
-- **State `needs_pairing` (red tray dot)**: the band rejected the stored key (for example after a reset or after pairing with a phone). Put the band in pairing mode and run `tools\connect.py` again.
-- **Port busy**: another instance (tray or console) is running, or something else uses 8765. Quit it or set `BAND_BRIDGE_PORT`.
-- **Logs**: `logs\bridge-YYYYmmdd.log` (bridge and tray) and `logs\ble-*.log` (BLE packets). Tray: Open log folder.
-- **Unpairing / starting over**: quit the bridge, delete `config/band.json`, remove the band from the phone app if needed, then pair again.
+<details>
+<summary><b>Band not found</b></summary>
+
+Make sure it is not connected to a phone, is close to the PC, and that Bluetooth is on. Run `tools\scan.py` to see whether it advertises.
+
+</details>
+
+<details>
+<summary><b>State <code>needs_pairing</code> (red tray dot)</b></summary>
+
+The band rejected the stored key, for example after a reset or after pairing with a phone. Put the band in pairing mode and run `tools\connect.py` again.
+
+</details>
+
+<details>
+<summary><b>Port busy</b></summary>
+
+Another instance (tray or console) is running, or something else uses 8765. Quit it or set `BAND_BRIDGE_PORT`.
+
+</details>
+
+<details>
+<summary><b>Where are the logs?</b></summary>
+
+`logs\bridge-YYYYmmdd.log` (bridge and tray) and `logs\ble-*.log` (every BLE packet, in hex). Tray: Open log folder.
+
+</details>
+
+<details>
+<summary><b>Unpairing or starting over</b></summary>
+
+Quit the bridge, delete `config/band.json`, remove the band from the phone app if needed, then pair again.
+
+</details>
 
 ## Development
 
 ```
-.venv\Scripts\python -m pytest tests
+.venv\Scripts\python -m unittest discover -s tests
 ```
-Dev scripts are in `tools/`: `scan.py`, `connect.py`, `probe.py`, `soak.py`, `notify_test.py`, `fitness_probe.py` (run one sync by hand; stop the tray first). Protocol notes live in [docs/protocol.md](docs/protocol.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The tests need no band, no Bluetooth and no config; CI runs them on every push. Dev scripts are in `tools/`: `scan.py`, `connect.py`, `probe.py`, `soak.py`, `notify_test.py`, `fitness_probe.py` (runs one sync by hand; stop the tray first). Protocol notes live in [docs/protocol.md](docs/protocol.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 

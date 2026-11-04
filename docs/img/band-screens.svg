@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="640" viewBox="0 0 1240 640" role="img" aria-label="Illustration of four band screens: a question with option replies, a permission prompt, the next-step choice, and the session board">
+  <defs>
+    <style>
+      text { font-family: "Segoe UI", system-ui, -apple-system, Helvetica, Arial, sans-serif; }
+      .cap { font-size: 22px; font-weight: 700; fill: #e8ecf1; text-anchor: middle; }
+      .sub { font-size: 16px; fill: #8a94a3; text-anchor: middle; }
+      .src { font-size: 14px; fill: #8a94a3; }
+      .t { font-size: 17px; fill: #ffffff; }
+      .m { font-size: 14px; fill: #8a94a3; }
+      .chip { fill: #1f2733; }
+      .chip-text { font-size: 17px; fill: #e8ecf1; text-anchor: middle; }
+      .go { fill: #3ddc97; }
+      .go-text { font-size: 17px; font-weight: 700; fill: #06210f; text-anchor: middle; }
+      .no { fill: #ff6b6b; }
+      .no-text { font-size: 17px; font-weight: 700; fill: #2a0606; text-anchor: middle; }
+    </style>
+  </defs>
+  <rect width="1240" height="640" rx="24" fill="#0e131b"/>
+
+  <!-- 1: question with option replies -->
+  <g transform="translate(40 36)">
+    <rect width="250" height="470" rx="52" fill="#0a0c10" stroke="#34405a" stroke-width="3"/>
+    <rect x="12" y="12" width="226" height="446" rx="42" fill="#000"/>
+    <text x="125" y="52" class="m" text-anchor="middle">Claude asks</text>
+    <text x="30" y="92" class="t">Which database?</text>
+    <text x="30" y="120" class="m">1) Postgres  2) SQLite</text>
+    <rect x="28" y="168" width="194" height="42" rx="21" class="chip"/><text x="125" y="195" class="chip-text">Postgres</text>
+    <rect x="28" y="220" width="194" height="42" rx="21" class="chip"/><text x="125" y="247" class="chip-text">SQLite</text>
+    <rect x="28" y="272" width="194" height="42" rx="21" class="chip"/><text x="125" y="299" class="chip-text">Ask me later</text>
+    <rect x="28" y="324" width="194" height="42" rx="21" class="chip"/><text x="125" y="351" class="chip-text">stop</text>
+    <text x="125" y="410" class="m" text-anchor="middle">tap a reply</text>
+  </g>
+  <text x="165" y="548" class="cap">ask_on_band</text>
+  <text x="165" y="574" class="sub">your options become the replies</text>
+
+  <!-- 2: permission prompt -->
+  <g transform="translate(340 36)">
+    <rect width="250" height="470" rx="52" fill="#0a0c10" stroke="#34405a" stroke-width="3"/>
+    <rect x="12" y="12" width="226" height="446" rx="42" fill="#000"/>
+    <text x="125" y="52" class="m" text-anchor="middle">band-bridge</text>
+    <text x="30" y="92" class="t">Allow Bash?</text>
+    <text x="30" y="124" class="m">npm test</text>
+    <rect x="28" y="190" width="194" height="52" rx="26" class="go"/><text x="125" y="224" class="go-text">Allow</text>
+    <rect x="28" y="254" width="194" height="52" rx="26" class="no"/><text x="125" y="288" class="no-text">Deny</text>
+    <text x="125" y="410" class="m" text-anchor="middle">no answer = normal dialog</text>
+  </g>
+  <text x="465" y="548" class="cap">Permission prompts</text>
+  <text x="465" y="574" class="sub">tap Allow or Deny, an error never allows</text>
+
+  <!-- 3: wrist remote -->
+  <g transform="translate(640 36)">
+    <rect width="250" height="470" rx="52" fill="#0a0c10" stroke="#34405a" stroke-width="3"/>
+    <rect x="12" y="12" width="226" height="446" rx="42" fill="#000"/>
+    <text x="125" y="52" class="m" text-anchor="middle">band-bridge</text>
+    <text x="30" y="92" class="t">Tests pass. Next?</text>
+    <rect x="28" y="140" width="194" height="42" rx="21" class="go"/><text x="125" y="167" class="go-text">Keep going</text>
+    <rect x="28" y="192" width="194" height="42" rx="21" class="chip"/><text x="125" y="219" class="chip-text">Run tests</text>
+    <rect x="28" y="244" width="194" height="42" rx="21" class="chip"/><text x="125" y="271" class="chip-text">Commit</text>
+    <rect x="28" y="296" width="194" height="42" rx="21" class="chip"/><text x="125" y="323" class="chip-text">Stop</text>
+    <text x="125" y="410" class="m" text-anchor="middle">Claude carries on</text>
+  </g>
+  <text x="765" y="548" class="cap">Wrist remote</text>
+  <text x="765" y="574" class="sub">steer Claude while you are away</text>
+
+  <!-- 4: session board -->
+  <g transform="translate(940 36)">
+    <rect width="250" height="470" rx="52" fill="#0a0c10" stroke="#34405a" stroke-width="3"/>
+    <rect x="12" y="12" width="226" height="446" rx="42" fill="#000"/>
+    <text x="125" y="52" class="m" text-anchor="middle">Claude sessions</text>
+    <circle cx="40" cy="104" r="7" fill="#ffb020"/><text x="58" y="110" class="t">api: waiting</text>
+    <circle cx="40" cy="150" r="7" fill="#3ddc97"/><text x="58" y="156" class="t">docs: done 2m</text>
+    <circle cx="40" cy="196" r="7" fill="#4c8bff"/><text x="58" y="202" class="t">web: working 5m</text>
+    <text x="125" y="410" class="m" text-anchor="middle">one notification, updated</text>
+  </g>
+  <text x="1065" y="548" class="cap">Session board</text>
+  <text x="1065" y="574" class="sub">every running session at a glance</text>
+
+  <text x="40" y="618" class="src">Illustration of the screens, not photos. Reply buttons are the band's quick-reply list.</text>
+</svg>
